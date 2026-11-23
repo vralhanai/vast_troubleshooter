@@ -121,6 +121,8 @@ class FixOutcome:
     after: str = ""
     block_code: str = ""
     rolled_back: bool = False
+    # The undo itself failed, so the change may still be in place.
+    rollback_failed: bool = False
 
     @property
     def changed_system(self) -> bool:

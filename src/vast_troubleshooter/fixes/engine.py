@@ -325,10 +325,21 @@ class FixEngine:
         status, reasons = self._judge(fix, failed, timed_out, after)
 
         rolled_back = False
+        rollback_failed = False
         if status is not FixStatus.SUCCEEDED and fix.rollback:
-            self._run_steps(run_id, fix, fix.rollback, operands, "rollback")
-            rolled_back = True
-            reasons = (*reasons, "rolled back")
+            undo_failure, _ = self._run_steps(
+                run_id, fix, fix.rollback, operands, "rollback"
+            )
+            if undo_failure:
+                # Never claim the change was undone when the undo itself failed.
+                rollback_failed = True
+                reasons = (
+                    *reasons,
+                    f"ROLLBACK FAILED ({undo_failure}); the change may still be in place",
+                )
+            else:
+                rolled_back = True
+                reasons = (*reasons, "rolled back")
             after, _ = self._look(fix)
 
         outcome = self._outcome(
@@ -341,6 +352,7 @@ class FixEngine:
             before=before,
             after=after,
             rolled_back=rolled_back,
+            rollback_failed=rollback_failed,
         )
         self._log.write(
             {
@@ -352,6 +364,7 @@ class FixEngine:
                 "before": before,
                 "after": after,
                 "rolled_back": rolled_back,
+                "rollback_failed": rollback_failed,
                 "undo_notes": fix.undo_notes,
             }
         )
@@ -430,6 +443,7 @@ class FixEngine:
         after: str = "",
         block_code: str = "",
         rolled_back: bool = False,
+        rollback_failed: bool = False,
     ) -> FixOutcome:
         return FixOutcome(
             status=status,
@@ -446,6 +460,7 @@ class FixEngine:
             after=after,
             block_code=block_code,
             rolled_back=rolled_back,
+            rollback_failed=rollback_failed,
         )
 
     def _blocked(

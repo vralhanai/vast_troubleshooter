@@ -38,7 +38,7 @@ MAX_ACTIONS = 50
 # Only these keys of an action-log line are ever copied into a report.
 _ACTION_KEYS = (
     "time", "run_id", "fix_id", "phase", "status", "block_code", "reasons",
-    "commands", "rental_state", "before", "after", "rolled_back", "op_id", "returncode",
+    "commands", "rental_state", "before", "after", "rolled_back", "rollback_failed", "op_id", "returncode",
 )  # fmt: skip
 
 
@@ -111,6 +111,7 @@ class ReportAction(_Closed):
     before: str | None = None
     after: str | None = None
     rolled_back: bool | None = None
+    rollback_failed: bool | None = None
     op_id: str | None = None
     returncode: int | None = None
 

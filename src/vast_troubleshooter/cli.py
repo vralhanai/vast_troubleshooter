@@ -295,6 +295,11 @@ def render_fix(outcome: FixOutcome, console: Console) -> None:
         out(f"  check before: {outcome.before or '-'}, after: {outcome.after or '-'}")
     if outcome.rolled_back:
         out("  the change was rolled back")
+    if outcome.rollback_failed:
+        out(
+            "  [bold red]ROLLBACK FAILED: the change may still be in place. "
+            "Check the system by hand.[/bold red]"
+        )
     if outcome.undo_notes and outcome.status is not FixStatus.BLOCKED:
         out(f"  how to undo: {clean(outcome.undo_notes)}")
 

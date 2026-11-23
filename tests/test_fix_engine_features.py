@@ -269,3 +269,97 @@ def test_fix_steps_accept_plain_strings_and_settle_time_is_bounded() -> None:
     assert BASE.commands == (FixStep("t.step1"), FixStep("t.step2"))
     with pytest.raises(ValueError, match="settle_seconds"):
         variant(settle_seconds=500.0)
+
+
+# -- a failed undo must never be reported as a successful one ------------------------------------
+# Found by independent testing (TestingDoneByCodex.md): the engine ignored the result of the
+# rollback steps and always said "rolled back".
+
+
+def failing_undo_engine(tmp_path: Path, status: CommandStatus = CommandStatus.ERROR):
+    world = World()
+    world.fixed_by = None  # the fix does not work, so a rollback is attempted
+    runner = FakeMutationRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
+        results={"t.undo": CommandResult("t.undo", status, returncode=7)},
+        on_run=world.on_run,
+    )
+    return build(tmp_path, variant(rollback=(FixStep("t.undo"),)), world, runner)[0]
+
+
+def test_a_failed_undo_is_never_reported_as_rolled_back(tmp_path: Path) -> None:
+    outcome = failing_undo_engine(tmp_path).run("variant-fix", **CONFIRM)
+    assert outcome.status is FixStatus.FAILED
+    assert outcome.rolled_back is False
+    assert outcome.rollback_failed is True
+    assert "rolled back" not in outcome.reasons
+    assert "ROLLBACK FAILED" in outcome.reasons[-1]
+    assert "t.undo failed" in outcome.reasons[-1]
+    assert "may still be in place" in outcome.reasons[-1]
+
+
+def test_a_timed_out_undo_is_also_a_failed_undo(tmp_path: Path) -> None:
+    outcome = failing_undo_engine(tmp_path, CommandStatus.TIMEOUT).run(
+        "variant-fix", **CONFIRM
+    )
+    assert outcome.rollback_failed is True and outcome.rolled_back is False
+    assert "t.undo timed out" in outcome.reasons[-1]
+
+
+def test_a_failed_undo_is_recorded_honestly_in_the_action_log(tmp_path: Path) -> None:
+    failing_undo_engine(tmp_path).run("variant-fix", **CONFIRM)
+    lines = log_lines(tmp_path)
+    undo = [line for line in lines if line["phase"] == "rollback"]
+    assert undo and undo[0]["status"] == "error" and undo[0]["returncode"] == 7
+    assert lines[-1]["rolled_back"] is False
+    assert lines[-1]["rollback_failed"] is True
+    assert "ROLLBACK FAILED" in lines[-1]["reasons"][-1]
+
+
+def test_a_working_undo_is_still_reported_as_rolled_back(tmp_path: Path) -> None:
+    world = World()
+    world.fixed_by = None
+    engine, _, _, _ = build(tmp_path, variant(rollback=(FixStep("t.undo"),)), world)
+    outcome = engine.run("variant-fix", **CONFIRM)
+    assert outcome.rolled_back is True and outcome.rollback_failed is False
+    assert outcome.reasons[-1] == "rolled back"
+
+
+def test_a_failure_with_no_rollback_defined_claims_neither(tmp_path: Path) -> None:
+    world = World()
+    world.fixed_by = None
+    engine, _, _, _ = build(tmp_path, variant(), world)
+    outcome = engine.run("variant-fix", **CONFIRM)
+    assert outcome.rolled_back is False and outcome.rollback_failed is False
+
+
+def test_the_cli_says_the_rollback_failed_and_never_says_rolled_back(
+    tmp_path: Path,
+) -> None:
+    import io
+
+    from rich.console import Console
+
+    from vast_troubleshooter.cli import render_fix
+
+    outcome = failing_undo_engine(tmp_path).run("variant-fix", **CONFIRM)
+    buffer = io.StringIO()
+    render_fix(outcome, Console(file=buffer, width=200, highlight=False))
+    text = buffer.getvalue()
+    assert "ROLLBACK FAILED" in text
+    assert "the change was rolled back" not in text
+    assert "Check the system by hand" in text
+
+
+def test_the_report_carries_the_failed_rollback_flag() -> None:
+    from vast_troubleshooter.report import ReportAction, _action
+
+    action = _action(
+        {
+            "run_id": "r",
+            "phase": "apply_finished",
+            "rolled_back": False,
+            "rollback_failed": True,
+        }
+    )
+    assert isinstance(action, ReportAction) and action.rollback_failed is True
