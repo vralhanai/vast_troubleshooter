@@ -1,0 +1,440 @@
+POC end-to-end test, started 2026-11-23T23:31:50Z
+Test machine: a container running systemd as PID 1 (image vast-troubleshooter:e2e), root user.
+
+### 0. Boot the test machine
+$ systemctl is-system-running; cat /etc/os-release | head -2; uname -r; id -un
+running
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+NAME="Ubuntu"
+6.18.58.1-microsoft-standard-WSL2
+root
+[exit 0]
+$ systemctl is-active systemd-resolved vastai.service
+active
+active
+[exit 0]
+(the machine's own upstream resolver, from the container runtime: 192.168.65.7)
+
+### 1. Baseline: resolver is the plain systemd-resolved stub, DNS works
+$ mkdir -p /etc/systemd/resolved.conf.d; printf '[Resolve]\nDNS=192.168.65.7\nFallbackDNS=\n' > /etc/systemd/resolved.conf.d/e2e-upstream.conf; printf 'nameserver 127.0.0.53\noptions edns0 trust-ad\n' > /etc/resolv.conf; systemctl restart systemd-resolved; sleep 2; cat /etc/resolv.conf; resolvectl status | head -5
+nameserver 127.0.0.53
+options edns0 trust-ad
+Global
+         Protocols: -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+  resolv.conf mode: foreign
+       DNS Servers: 192.168.65.7
+
+[exit 0]
+$ timeout 15 python3 -c "import socket; print('vast.ai ->', socket.getaddrinfo('vast.ai', None)[0][4][0])"
+vast.ai -> 76.76.21.21
+[exit 0]
+$ vast-troubleshooter diagnose | head -12
+Vast Troubleshooter diagnosis
+Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
+15 checks: 0 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
+Rental state: unknown (disruptive fixes are blocked)
+
+No problems found in the checks that ran.
+Could not be checked (8):
+  The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
+  An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
+  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
+  Docker is running but the NVIDIA runtime is not registered (critical): docker.nvidia_runtime_present: error
+  CUDA version is below the Vast minimum (11.8) (critical): driver.cuda_version_code: no data
+[exit 0]
+
+### 2. Capture real systemd output as fixtures (active, inactive, auto-restart, failed, not found)
+$ cat /etc/systemd/system/vastai.service | grep -c RestartSec
+1
+[exit 0]
+$ systemctl kill -s KILL vastai.service; sleep 1; systemctl show vastai.service -p LoadState -p ActiveState -p SubState -p NRestarts --no-pager
+NRestarts=0
+LoadState=loaded
+ActiveState=activating
+SubState=auto-restart
+[exit 0]
+$ systemctl stop vastai.service; systemctl show vastai.service -p LoadState -p ActiveState -p SubState -p NRestarts --no-pager
+NRestarts=0
+LoadState=loaded
+ActiveState=inactive
+SubState=dead
+[exit 0]
+$ printf '[Service]\nExecStart=/bin/false\n' > /etc/systemd/system/e2ebad.service; systemctl daemon-reload; systemctl start e2ebad.service; sleep 1; systemctl show e2ebad.service -p LoadState -p ActiveState -p SubState -p NRestarts --no-pager
+NRestarts=0
+LoadState=loaded
+ActiveState=failed
+SubState=failed
+[exit 0]
+$ systemctl show nonexistent-unit.service -p LoadState -p ActiveState -p SubState -p NRestarts --no-pager
+NRestarts=0
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+[exit 0]
+$ systemctl reset-failed e2ebad.service; rm -f /etc/systemd/system/e2ebad.service; systemctl daemon-reload; systemctl start vastai.service; systemctl is-active vastai.service
+active
+[exit 0]
+
+### 3. Inject the fault: systemd-resolved has no upstream DNS server at all
+$ rm -f /etc/systemd/resolved.conf.d/e2e-upstream.conf; systemctl restart systemd-resolved; resolvectl flush-caches; sleep 2; resolvectl status | head -6
+Global
+         Protocols: -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+  resolv.conf mode: foreign
+
+Link 2 (eth0)
+    Current Scopes: none
+[exit 0]
+$ timeout 30 python3 -c "import socket,time; t=time.time()
+try:
+    print('resolved', socket.getaddrinfo('vast.ai', None)[0][4][0])
+except Exception as e:
+    print('RESOLUTION FAILED after %.1fs: %s' % (time.time()-t, e))"
+RESOLUTION FAILED after 0.0s: [Errno -3] Temporary failure in name resolution
+[exit 0]
+
+### 4. diagnose must report the DNS finding
+$ vast-troubleshooter diagnose | head -16
+Vast Troubleshooter diagnosis
+Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
+15 checks: 1 problem(s), 5 ok, 8 could not be checked, 1 not applicable.
+Rental state: unknown (disruptive fixes are blocked)
+
+CRITICAL DNS cannot resolve vast.ai (offline)
+  evidence: network.dns_vast_ai_resolves = False [ok]
+  what to do: The Vast daemon reaches Vast by name, so a broken resolver keeps the host offline. Check /etc/resolv.conf and the resolver service, or try a public resolver such as 1.1.1.1.
+
+Could not be checked (8):
+  The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
+  An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
+  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
+  Docker is running but the NVIDIA runtime is not registered (critical): docker.nvidia_runtime_present: error
+  CUDA version is below the Vast minimum (11.8) (critical): driver.cuda_version_code: no data
+  nvidia-smi is failing or hanging (critical): driver.nvidia_smi_responding: missing
+[exit 0]
+$ vast-troubleshooter diagnose --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('exit_code', d['exit_code'], 'findings', [f['rule_id'] for f in d['findings']])"
+exit_code 1 findings ['network.dns_vast_ai_unresolvable']
+[exit 0]
+
+### 5. The DNS fix is demo only: refused without the demo flag
+$ vast-troubleshooter fix
+restart-vast-daemon: Restart the Vast host daemon (vastai.service).
+fix-dns-resolver (demo only): Point DNS on the default network link at public resolvers, at runtime only.
+[exit 0]
+$ vast-troubleshooter fix fix-dns-resolver
+BLOCKED fix-dns-resolver
+  this fix is only for a disposable test machine; it is not offered on a live host
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+[exit 1]
+
+### 6. With the demo flag, the real CLI is still BLOCKED (VM rental source is a stub: unknown)
+$ vast-troubleshooter fix fix-dns-resolver --demo-disposable-host
+BLOCKED fix-dns-resolver
+  rental state is unknown: VM rental detection is not implemented (the Vast docs do not say how VM rentals appear on the host)
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: unknown
+[exit 1]
+$ (typing: fix-dns-resolver) vast-troubleshooter fix fix-dns-resolver --apply --demo-disposable-host
+BLOCKED fix-dns-resolver
+  rental state is unknown: VM rental detection is not implemented (the Vast docs do not say how VM rentals appear on the host)
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: unknown
+[exit 1]
+
+### 7a. Rental simulation: a container exists (evidence from the real container source)
+$ printf 'running\n' > /var/lib/e2e/containers; vast-troubleshooter collect rentals
+rentals.state = active [ok]
+rentals.blocks_disruptive_fixes = True [ok]
+rentals.reason = 1 container(s) exist, 1 running; any container is treated as a possible rental [ok]
+rentals.unresolved_sources = vms [ok]
+rentals.containers_total = 1 [ok]
+rentals.containers_running = 1 [ok]
+[exit 0]
+$ vast-troubleshooter fix fix-dns-resolver --demo-disposable-host
+BLOCKED fix-dns-resolver
+  rental state is active: 1 container(s) exist, 1 running; any container is treated as a possible rental
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: active
+[exit 1]
+
+### 7b. Remove that evidence: the state becomes unknown (VM source cannot prove absence), the fix stays blocked
+$ : > /var/lib/e2e/containers; vast-troubleshooter collect rentals
+rentals.state = unknown [ok]
+rentals.blocks_disruptive_fixes = True [ok]
+rentals.reason = VM rental detection is not implemented (the Vast docs do not say how VM rentals appear on the host) [ok]
+rentals.unresolved_sources = vms [ok]
+rentals.containers_total = 0 [ok]
+rentals.containers_running = 0 [ok]
+[exit 0]
+$ vast-troubleshooter fix fix-dns-resolver --demo-disposable-host
+BLOCKED fix-dns-resolver
+  rental state is unknown: VM rental detection is not implemented (the Vast docs do not say how VM rentals appear on the host)
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: unknown
+[exit 1]
+
+### 8. HARNESS (injected VM evidence): a running container still blocks the apply
+$ printf 'running\n' > /var/lib/e2e/containers; python3 /opt/e2e/driver.py fix-dns-resolver --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+BLOCKED fix-dns-resolver
+  rental state is active: 1 container(s) exist, 1 running; any container is treated as a possible rental
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: active
+[exit 1]
+$ : > /var/lib/e2e/containers
+[exit 0]
+
+### 9. HARNESS (injected VM evidence = none): dry run, then apply the DNS fix for real
+$ python3 /opt/e2e/driver.py fix-dns-resolver
+TEST HARNESS: injected VM evidence = none; apply = False
+DRY_RUN fix-dns-resolver
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  would run (nothing has been changed):
+    /usr/bin/resolvectl dns eth0 1.1.1.1 8.8.8.8
+    /usr/bin/resolvectl flush-caches
+  rental state: none
+  check before: fail, after: -
+  how to undo: Run: sudo resolvectl revert <link>. The change is runtime-only, so a reboot also undoes it.
+[exit 0]
+$ python3 /opt/e2e/driver.py fix-dns-resolver --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+SUCCEEDED fix-dns-resolver
+  the check now passes
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: none
+  check before: fail, after: pass
+  how to undo: Run: sudo resolvectl revert <link>. The change is runtime-only, so a reboot also undoes it.
+[exit 0]
+$ resolvectl status eth0 | head -8
+Link 2 (eth0)
+    Current Scopes: DNS
+         Protocols: +DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: 1.1.1.1
+       DNS Servers: 1.1.1.1 8.8.8.8
+[exit 0]
+$ timeout 20 python3 -c "import socket; print('vast.ai ->', socket.getaddrinfo('vast.ai', None)[0][4][0])"
+vast.ai -> 76.76.21.21
+[exit 0]
+
+### 10. Re-run diagnose: the DNS finding must clear
+$ vast-troubleshooter diagnose | head -10
+Vast Troubleshooter diagnosis
+Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
+15 checks: 0 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
+Rental state: unknown (disruptive fixes are blocked)
+
+No problems found in the checks that ran.
+Could not be checked (8):
+  The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
+  An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
+  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
+[exit 0]
+$ vast-troubleshooter diagnose --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('exit_code', d['exit_code'], 'findings', [f['rule_id'] for f in d['findings']])"
+exit_code 3 findings []
+[exit 0]
+
+### 11. Undo by hand: resolvectl revert eth0 (what the fix's undo notes say)
+$ resolvectl revert eth0; resolvectl status eth0 | head -6
+Link 2 (eth0)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+[exit 0]
+
+### 12. Force a REAL failure and watch the automatic rollback (blackhole the public resolvers)
+$ ip route add blackhole 1.1.1.1/32; ip route add blackhole 8.8.8.8/32; ip route show | grep blackhole
+blackhole 1.1.1.1 
+blackhole 8.8.8.8 
+[exit 0]
+$ python3 /opt/e2e/driver.py fix-dns-resolver --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+FAILED fix-dns-resolver
+  the problem is still present
+  rolled back
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: none
+  check before: fail, after: fail
+  the change was rolled back
+  how to undo: Run: sudo resolvectl revert <link>. The change is runtime-only, so a reboot also undoes it.
+[exit 4]
+$ resolvectl status eth0 | head -6
+Link 2 (eth0)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+[exit 0]
+$ ip route del blackhole 1.1.1.1/32; ip route del blackhole 8.8.8.8/32
+[exit 0]
+
+### 13. Other resolver setups are left to the operator (static resolv.conf, no systemd-resolved stub)
+$ printf 'nameserver 192.0.2.1\n' > /etc/resolv.conf; python3 /opt/e2e/driver.py fix-dns-resolver --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+BLOCKED fix-dns-resolver
+  /etc/resolv.conf is not the plain systemd-resolved stub (split DNS, a VPN, or a static file); change DNS by hand
+  target: DNS servers of the default network link, held by systemd-resolved (not written to any file)
+  expected change: The link uses 1.1.1.1 and 8.8.8.8, and vast.ai resolves.
+  warning: Demo only: use a disposable test machine, never a live host.
+  warning: Keep a console or out-of-band way in. A wrong DNS change can cut network access.
+  warning: Replacing resolvers can break split DNS and leak internal names to public resolvers.
+  rental state: none
+  check before: pass, after: -
+[exit 1]
+$ printf 'nameserver 127.0.0.53\noptions edns0 trust-ad\n' > /etc/resolv.conf
+[exit 0]
+
+### 14. The other live fix: restart-vast-daemon (service stopped, so the rule fails)
+$ systemctl stop vastai.service; vast-troubleshooter diagnose | grep -A3 'vastai.service is not running' | head -5
+CRITICAL vastai.service is not running (offline)
+  evidence: vast_host.service_active = False [ok]
+  what to do: Check 'sudo systemctl status vastai' and the daemon log. If the unit does not exist, the Vast hosting software is not installed. Do not restart it while customer rentals are active.
+
+[exit 0]
+$ vast-troubleshooter fix restart-vast-daemon
+BLOCKED restart-vast-daemon
+  rental state is unknown: VM rental detection is not implemented (the Vast docs do not say how VM rentals appear on the host)
+  target: the systemd unit vastai.service
+  expected change: The daemon is stopped and started again and stays running.
+  warning: This stops and starts the Vast daemon. Customer workloads can be interrupted.
+  rental state: unknown
+[exit 1]
+$ python3 /opt/e2e/driver.py restart-vast-daemon
+TEST HARNESS: injected VM evidence = none; apply = False
+DRY_RUN restart-vast-daemon
+  target: the systemd unit vastai.service
+  expected change: The daemon is stopped and started again and stays running.
+  warning: This stops and starts the Vast daemon. Customer workloads can be interrupted.
+  would run (nothing has been changed):
+    /usr/bin/systemctl restart vastai.service
+  rental state: none
+  check before: fail, after: -
+  how to undo: A restart cannot be undone. Any workload the restart interrupted is not restored. That is why it is refused unless no rental can be found.
+[exit 0]
+$ python3 /opt/e2e/driver.py restart-vast-daemon --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+SUCCEEDED restart-vast-daemon
+  the check now passes
+  target: the systemd unit vastai.service
+  expected change: The daemon is stopped and started again and stays running.
+  warning: This stops and starts the Vast daemon. Customer workloads can be interrupted.
+  rental state: none
+  check before: fail, after: pass
+  how to undo: A restart cannot be undone. Any workload the restart interrupted is not restored. That is why it is refused unless no rental can be found.
+[exit 0]
+$ systemctl is-active vastai.service
+active
+[exit 0]
+$ python3 /opt/e2e/driver.py restart-vast-daemon --apply
+TEST HARNESS: injected VM evidence = none; apply = True
+BLOCKED restart-vast-daemon
+  nothing to fix: the check already passes
+  target: the systemd unit vastai.service
+  expected change: The daemon is stopped and started again and stays running.
+  warning: This stops and starts the Vast daemon. Customer workloads can be interrupted.
+  rental state: none
+  check before: pass, after: -
+[exit 1]
+
+### 15. Report: written on real Linux, then checked for leaks
+$ vast-troubleshooter report --output-dir /reports
+Report written. Nothing was uploaded. Read both files before you share them:
+  /reports/report-20261123T233244Z.json  (29603 bytes)
+  /reports/report-20261123T233244Z.md  (8205 bytes)
+Diagnosis: 1 problem(s), 8 could not be checked (incomplete).
+[exit 0]
+$ ls -la /reports
+total 52
+drwxr-xr-x 1 root root  4096 Nov 23 23:32 .
+drwxr-xr-x 1 root root  4096 Nov 23 23:31 ..
+-rw------- 1 root root 29603 Nov 23 23:32 report-20261123T233244Z.json
+-rw------- 1 root root  8205 Nov 23 23:32 report-20261123T233244Z.md
+[exit 0]
+$ grep -c -i -E 'poc-machine|172\.17\.0\.|192\.168\.65\.|root@' /reports/*.json /reports/*.md; true
+/reports/report-20261123T233244Z.json:0
+/reports/report-20261123T233244Z.md:0
+[exit 0]
+$ grep -o -h -E '1\.1\.1\.1|8\.8\.8\.8' /reports/*.json /reports/*.md | sort | uniq -c
+      5 1.1.1.1
+      3 8.8.8.8
+[exit 0]
+$ grep -o -h -E '[0-9]{1,3}(\.[0-9]{1,3}){3}' /reports/*.json /reports/*.md | grep -v -E '^(1\.1\.1\.1|8\.8\.8\.8)$' | sort -u; echo '(end of other addresses)'
+(end of other addresses)
+[exit 0]
+$ grep -o -E '"environment": "[^"]*"' /reports/*.json
+"environment": "container on a WSL2 kernel"
+[exit 0]
+$ grep -c -E 'raw_excerpt|source_command' /reports/*.json; true
+0
+[exit 0]
+
+### 16. Action log and file permissions
+$ ls -la /var/lib/vast-troubleshooter
+total 24
+drwx------ 2 root root 4096 Nov 23 23:32 .
+drwxr-xr-x 1 root root 4096 Nov 23 23:32 ..
+-rw------- 1 root root 8441 Nov 23 23:32 actions.jsonl
+-rw------- 1 root root    0 Nov 23 23:32 fix.lock
+[exit 0]
+$ python3 -c "import json; [print(json.dumps({k:v for k,v in json.loads(l).items() if k in ('time','run_id','fix_id','phase','status','block_code')}, sort_keys=True)) for l in open('/var/lib/vast-troubleshooter/actions.jsonl')]" | tail -25
+{"block_code": "demo_only", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "5731f3355ed1", "status": "blocked", "time": "2026-11-23T23:32:08+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "ed9e5a910d15", "status": "blocked", "time": "2026-11-23T23:32:09+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "f401b2031b86", "status": "blocked", "time": "2026-11-23T23:32:10+00:00"}
+{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "54c9a892b5d0", "status": "blocked", "time": "2026-11-23T23:32:11+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "17872327ce2f", "status": "blocked", "time": "2026-11-23T23:32:12+00:00"}
+{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "7bf0d1684933", "status": "blocked", "time": "2026-11-23T23:32:13+00:00"}
+{"block_code": "", "fix_id": "fix-dns-resolver", "phase": "dry_run", "run_id": "2349768a4af0", "status": "dry_run", "time": "2026-11-23T23:32:14+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "cf5a1cc9a90d", "time": "2026-11-23T23:32:14+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "cf5a1cc9a90d", "status": "ok", "time": "2026-11-23T23:32:14+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "cf5a1cc9a90d", "status": "ok", "time": "2026-11-23T23:32:14+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "cf5a1cc9a90d", "status": "succeeded", "time": "2026-11-23T23:32:16+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "2d8d9d7e9da3", "time": "2026-11-23T23:32:20+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:20+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:20+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:27+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:27+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "2d8d9d7e9da3", "status": "failed", "time": "2026-11-23T23:32:27+00:00"}
+{"block_code": "precondition_failed", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "7d6e8cc006db", "status": "blocked", "time": "2026-11-23T23:32:29+00:00"}
+{"block_code": "rental_unknown", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "320464858d97", "status": "blocked", "time": "2026-11-23T23:32:31+00:00"}
+{"block_code": "", "fix_id": "restart-vast-daemon", "phase": "dry_run", "run_id": "3e17e2da1556", "status": "dry_run", "time": "2026-11-23T23:32:31+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "apply_started", "run_id": "876fbd17d1fa", "time": "2026-11-23T23:32:32+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "command", "run_id": "876fbd17d1fa", "status": "ok", "time": "2026-11-23T23:32:32+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "apply_finished", "run_id": "876fbd17d1fa", "status": "succeeded", "time": "2026-11-23T23:32:42+00:00"}
+{"block_code": "no_problem", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "504cab619d41", "status": "blocked", "time": "2026-11-23T23:32:43+00:00"}
+[exit 0]
+$ grep -c -i -E 'stdout|stderr|password|token' /var/lib/vast-troubleshooter/actions.jsonl; true
+0
+[exit 0]
+
+Finished 2026-11-23T23:32:48Z

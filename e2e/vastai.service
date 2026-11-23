@@ -1,0 +1,10 @@
+[Unit]
+Description=Vast.ai Host Daemon (a stand-in for the e2e test machine)
+
+[Service]
+ExecStart=/bin/sleep infinity
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

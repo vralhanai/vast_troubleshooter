@@ -37,7 +37,7 @@ raw command output (sanitized), and replace the fixtures in `tests/fixtures/`.
 |---|---|---|---|
 | P1 | **Rental detection** (step 13) | Today the state can never be `none`, so **every disruptive fix is blocked** (deliberate). The tool cannot restart the daemon until this is solved. | The VM source is a stub. The container source treats any container as a rental (over-blocks). Needs: how a container rental and a VM rental really look, whether the host's own containers can be told apart, and whether the daemon exposes rental state anywhere. See `docs/rental-detection.md` for the exact samples to capture. |
 | P1 | **`kaalia.log` real format** | The error counts and the network/Docker/GPU categories are keyword guesses. | Capture a log tail with no rental, a container rental, and a failure. Replace the generic patterns with real ones. Consider using the log as a third rental-evidence source. |
-| P1 | **Real `systemctl show vastai.service`** | Restart-loop and not-installed detection are written from the generic systemd format. | Capture active, failed, and restart-loop states. |
+| P2 | **Real `systemctl show vastai.service` (partly done)** | Real systemd 255 output was captured in step 18 for a stand-in unit (active, inactive, auto-restart, failed, not-found), and the parsing and rules handle it. Still needed: the same for the real Vast daemon. | Fixtures: `tests/fixtures/real_systemd_container/`. |
 | P2 | **Read the host setup guide** | https://cloud.vast.ai/host/setup/ was never read. It may list OS versions, a driver minimum, Docker version, port ranges, and log paths. | Re-check every threshold in `rules/*.toml` against it. |
 | P2 | **Read the other unread Vast pages** | Kernel upgrade, SSH password login, Secure Boot, and the driver-upgrade details beyond the table. | Needed for the Secure Boot, SSH, and kernel rules (section 5). |
 | P2 | **Which checks Vast really runs** | The verification page lists no individual checks and no numeric de-verification thresholds. | Compare our findings with what the Vast console shows for a real de-verified machine, and tune severities. |
@@ -221,6 +221,21 @@ Real observations from running the tool in a container on a Windows ARM64 laptop
 | P2 | **Captured fixtures are from a container, not a host.** | `tests/fixtures/real_linux_container/` is real output for `lsblk`, `df`, `findmnt`, `ip route`, `lspci`, `os-release`, `/proc/version`, `resolv.conf`, and the real `tail` and `dmesg` error texts. It does not replace host captures (section 3a). |
 | P3 | **Reading a report out of the Docker volume is clumsy.** | Needs a helper command or a documented copy step (`docker cp`). |
 | P3 | **`docker compose run` leaves images and a pulled `alpine` behind.** | `docker image rm vast-troubleshooter:dev vast-troubleshooter:test` cleans up. |
+
+---
+
+## 10b. Found while running the POC test (step 18)
+
+| P | Item | Detail |
+|---|---|---|
+| P1 | **The CLI cannot apply any fix, by design, until VM rental detection exists.** | Confirmed end to end in step 18. The DNS fix, its rollback, and the restart fix only ran through the test harness (`e2e/driver.py`) with an injected "no VM rentals" source. Everything else about the engine is proven; the one missing input is real VM evidence (section 2). |
+| P2 | **A real VM was never used.** | The test machine is a container sharing Docker Desktop's kernel. Repeat the `e2e/run_poc.sh` scenario on a real Ubuntu VM or host (QEMU, a cloud instance, or a spare machine). |
+| P2 | **`--use-sudo` was never exercised.** | The test machine runs as root. Add a non-root user with passwordless `sudo` to the `e2e` image and run the fixes as that user. |
+| P2 | **The interactive confirmation prompt was never typed by a human against a fix that can run.** | Unit tests cover it, but only the harness reached a runnable fix. |
+| P2 | **No `amd64` e2e run.** | Same as the image builds (section 3b). |
+| P2 | **Add the e2e run to CI.** | It needs a runner that allows `SYS_ADMIN` and `NET_ADMIN` containers and systemd. |
+| P3 | **Docker Desktop answers DNS sent to any address,** so a "dead upstream" is not a usable fault there. | The e2e scenario uses a resolver with no upstream instead. A real VM would allow other faults (unreachable upstream, wrong search domain, split DNS). |
+| P3 | **Test the fix against other resolver managers.** | Only systemd-resolved was exercised. NetworkManager, netplan with networkd, and a static `resolv.conf` are refused by design; confirm each is refused for the right reason on real setups. |
 
 ---
 

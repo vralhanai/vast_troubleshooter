@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stand-in for the Docker CLI inside the disposable test machine.
+# There is NO Docker daemon here. This script exists so the rental check has
+# something to ask. It understands only:
+#     docker [--host H] ps -a --format {{.State}}
+# and prints one state per line from /var/lib/e2e/containers (create that file
+# to "start" a container; remove or empty it to "remove" them). Everything else
+# fails the way a missing daemon does.
+case " $* " in
+  *" ps "*)
+    [ -f /var/lib/e2e/containers ] && cat /var/lib/e2e/containers
+    exit 0
+    ;;
+esac
+echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+exit 1

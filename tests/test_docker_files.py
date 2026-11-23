@@ -176,3 +176,49 @@ def test_the_docs_record_the_observed_limits() -> None:
         "digest",
     ):
         assert needle in DOC
+
+
+# -- the e2e test machine must never become the default -------------------------------------------
+
+
+def test_a_plain_docker_build_produces_the_hardened_runtime_image_not_the_e2e_machine() -> (
+    None
+):
+    stages = re.findall(r"^FROM\s+(\S+)\s+AS\s+(\S+)", DOCKERFILE, re.MULTILINE)
+    assert stages[-1] == ("runtime", "final")  # Docker builds the last stage by default
+    assert [name for _, name in stages].index("e2e") < len(stages) - 1
+
+
+def test_the_e2e_stage_is_never_used_by_the_compose_files() -> None:
+    for text in (COMPOSE, GPU):
+        assert "e2e" not in text
+
+
+def test_the_e2e_machine_is_documented_as_disposable_and_never_for_a_real_host() -> (
+    None
+):
+    e2e = DOCKERFILE.split("AS e2e")[0].rsplit("# -- e2e", 1)[1]
+    assert "NEVER be used on a real host" in e2e or "must NEVER" in e2e
+    script = (ROOT / "e2e" / "run_poc.sh").read_text()
+    assert "DISPOSABLE" in script and "NOT --privileged" in script
+    assert "--privileged" not in code(script).replace(
+        "NOT --privileged", ""
+    )  # never actually used
+
+
+def test_the_e2e_container_gets_only_the_capabilities_it_needs() -> None:
+    script = code((ROOT / "e2e" / "run_poc.sh").read_text())
+    added = set(re.findall(r"--cap-add (\w+)", script))
+    assert added == {"SYS_ADMIN", "NET_ADMIN"}
+    assert (
+        "docker.sock" not in script
+        and "--pid" not in script
+        and "--network host" not in script
+    )
+
+
+def test_the_test_driver_says_it_is_a_harness_and_not_part_of_the_tool() -> None:
+    driver = (ROOT / "e2e" / "driver.py").read_text()
+    assert "TEST HARNESS ONLY" in driver
+    src = ROOT / "src"
+    assert not any("InjectedVms" in p.read_text() for p in src.rglob("*.py"))

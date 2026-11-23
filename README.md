@@ -84,6 +84,7 @@ Based on public Vast.ai host documentation ([machine offline](https://docs.vast.
 - [BACKLOG.md](BACKLOG.md): what was skipped, what is unverified, and what to do once a real Vast host, an Ubuntu machine, or an API key is available.
 - [docs/rental-detection.md](docs/rental-detection.md): how rental detection works today and what is needed to finish it.
 - [docs/docker-dev.md](docs/docker-dev.md): running and testing the Linux tool in a container on Windows.
+- [docs/poc-results.md](docs/poc-results.md): the end-to-end POC test on a systemd test machine, with what was real, what was a stand-in, and what went wrong.
 - [LICENSE](LICENSE): MIT.
 
 ## Run on Windows (dev/test)

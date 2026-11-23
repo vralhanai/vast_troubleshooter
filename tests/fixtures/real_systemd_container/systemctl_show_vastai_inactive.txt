@@ -1,0 +1,4 @@
+NRestarts=0
+LoadState=loaded
+ActiveState=inactive
+SubState=dead
