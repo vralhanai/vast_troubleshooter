@@ -27,6 +27,7 @@ class FactStatus(StrEnum):
     MISSING = "missing"  # the tool or file needed is not present
     ERROR = "error"  # the read failed
     TIMEOUT = "timeout"  # the read took too long
+    UNSUPPORTED = "unsupported"  # the hardware or software does not provide it
 
 
 class CheckStatus(StrEnum):

@@ -11,7 +11,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 2:** Core data models (`95c02ca`)
 - [x] **Step 3:** Command runner with allowlist (Linux test run still open, see Step 3 verify)
 - [x] **Step 4:** Collector framework and `system` collector (Linux run still open)
-- [ ] **Step 5:** `gpu` and `driver` collectors
+- [x] **Step 5:** `gpu` and `driver` collectors (real-host fixtures still open)
 - [ ] **Step 6:** `docker` collector
 - [ ] **Step 7:** `kernel_log` collector
 - [ ] **Step 8:** `network` collector
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 5 verification (2026-11-23): `uv run pytest` 119 passed; ruff check and format clean. Added `collectors/gpu.py`, `collectors/driver.py`, 5 new read operations, and GPU fixtures (healthy 1 and 8 GPUs, failed driver, `ERR!`/`[N/A]`/`[Unknown Error]` columns, 7-of-8 GPUs). Additions beyond the written scope, all small: `FactStatus.UNSUPPORTED` (so `[N/A]` is not confused with an observed empty value); `gpu.pci_count` from `lspci -d 10de: -nn` as the source for the expected GPU count; derived facts `gpu.models_identical` and `gpu.vram_min_mib` and `driver.cuda_version_code` (CUDA's integer encoding, 11.8 = 11080) because the planned rule language has no aggregation or version comparison; and the throttle-reason query is split into two operations with a fallback, because an unknown field name makes the whole `nvidia-smi` query fail. A broken or hung `nvidia-smi` is reported as `driver.nvidia_smi_responding = False` (an observation), not as an unknown. On this Windows machine `collect gpu` and `collect driver` report `missing`, as expected.
 
 Step 4 verification (2026-11-23): `uv run pytest` 80 passed; ruff check and format clean. Added `collectors/base.py` (`Collector`, `run_collectors`), `collectors/system.py`, the registry, `files.py` (allowlisted, size-bounded file reads), `context.py` (`HostContext` bundles the runner and file source), `FakeFiles`/`fake_context` in `testing.py`, and the `collect` CLI command (terminal control characters are replaced in output). Design choice: collectors take a `HostContext` instead of just a runner, because `/etc/os-release` and `/proc/uptime` are files, not commands, and need the same allowlist and fake-for-tests treatment. Fixtures are written from documented formats, not captured from a real host (see `tests/fixtures/README.md`). Linux run of `collect system` is still open.
 
@@ -175,14 +177,14 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Read GPU and NVIDIA driver state through `nvidia-smi`.
 
 **Scope:**
-- [ ] `gpu`: GPU count, name, VRAM total, temperature, power, clocks, throttle reasons, ECC state, PCIe generation and width. Uses `nvidia-smi --query-gpu=... --format=csv,noheader,nounits`.
-- [ ] `driver`: driver version and CUDA version from `nvidia-smi`.
-- [ ] Handles the failure cases on the machine-offline page: "NVIDIA-SMI has failed", fewer GPUs than expected, `ERR!` or `Unknown Error` columns, and a hang (timeout).
-- [ ] Fixtures: one healthy 1-GPU and 8-GPU output, one failed-driver output, one with `ERR!`.
+- [x] `gpu`: GPU count, name, VRAM total, temperature, power, clocks, throttle reasons, ECC state, PCIe generation and width. Uses `nvidia-smi --query-gpu=... --format=csv,noheader,nounits`.
+- [x] `driver`: driver version and CUDA version from `nvidia-smi`.
+- [x] Handles the failure cases on the machine-offline page: "NVIDIA-SMI has failed", fewer GPUs than expected, `ERR!` or `Unknown Error` columns, and a hang (timeout).
+- [x] Fixtures: one healthy 1-GPU and 8-GPU output, one failed-driver output, one with `ERR!`.
 
 **Verify:**
-- [ ] Tests for each fixture, including the failure fixtures.
-- [ ] Requires a real Ubuntu host sample (see blockers). Until then, fixtures are written from the `nvidia-smi` documentation and marked "unverified against real output".
+- [x] Tests for each fixture, including the failure fixtures.
+- [x] Fixtures are written from the `nvidia-smi` documentation and marked "unverified against real output" in `tests/fixtures/README.md`. **Still open:** replace them with real captures from an Ubuntu host with NVIDIA GPUs (see blockers), and confirm which throttle-reason field name each driver accepts.
 
 **Commit:** `feat(collectors): add gpu and driver collectors`
 

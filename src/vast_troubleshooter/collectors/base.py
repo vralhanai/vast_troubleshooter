@@ -54,8 +54,9 @@ class Collector(ABC):
     def failed_from_result(self, key: str, result: CommandResult) -> Fact:
         """A fact for a command that did not succeed."""
         detail = result.detail
-        if result.stderr:
-            detail = f"{detail}: {result.stderr}".strip(": ")
+        text = (result.stderr or result.stdout).strip()[:300]
+        if text:
+            detail = f"{detail}: {text}".strip(": ")
         return self.fact(
             key,
             status=fact_status(result),
