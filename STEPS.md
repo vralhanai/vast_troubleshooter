@@ -2,6 +2,16 @@
 
 This is the step-by-step plan to build the POC described in [PLAN.md](PLAN.md). **Nothing here is implemented yet.** Work starts only after the plan is confirmed.
 
+## Progress
+
+| Step | Title | Status | Commit |
+|---|---|---|---|
+| 0 | Design baseline | Done | `c068d49`, `514a93a` |
+| 1 | Project tooling and CLI skeleton | Done | see git log |
+| 2 to 19 | Not started | Waiting | |
+
+Step 1 verification (run 2026-11-23): `uv run pytest` 2 passed; `ruff check` and `ruff format --check` clean; `vast-troubleshooter --help` and `version` (prints `0.1.0`) work. Python 3.15.2 was available to `uv`, so the pin stays. Installed: typer 0.29.2, pytest 9.2.0, ruff 0.17.6.
+
 ## How we work
 
 For every step:
