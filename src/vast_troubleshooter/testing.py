@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 from vast_troubleshooter.context import HostContext
+from vast_troubleshooter.netaccess import NetworkAccess
 from vast_troubleshooter.runner import CommandResult, CommandStatus
 
 
@@ -47,8 +48,49 @@ class FakeFiles:
         return value
 
 
+class FakeNetwork:
+    """Scripted DNS and TCP results. Never touches the network.
+
+    `resolve_result` is a list of addresses or an exception to raise. `connect_results`
+    maps (host, port) to None (success) or an exception to raise; an unlisted
+    destination raises ConnectionRefusedError.
+    """
+
+    def __init__(
+        self,
+        resolve_result: list[str] | Exception | None = None,
+        connect_results: Mapping[tuple[str, int], Exception | None] | None = None,
+    ) -> None:
+        self._resolve = ["203.0.113.7"] if resolve_result is None else resolve_result
+        self._connect = dict(connect_results or {})
+        self.resolve_calls: list[tuple[str, float]] = []
+        self.connect_calls: list[tuple[str, int, float]] = []
+
+    def resolve(self, host: str, timeout: float) -> list[str]:
+        self.resolve_calls.append((host, timeout))
+        if isinstance(self._resolve, Exception):
+            raise self._resolve
+        return list(self._resolve)
+
+    def connect(self, host: str, port: int, timeout: float) -> None:
+        self.connect_calls.append((host, port, timeout))
+        outcome = self._connect.get((host, port), ConnectionRefusedError())
+        if outcome is not None:
+            raise outcome
+
+
 def fake_context(
     results: Mapping[str, CommandResult | str] | None = None,
     files: Mapping[str, str | Exception] | None = None,
+    network: NetworkAccess | None = None,
+    allow_outbound: bool = False,
 ) -> HostContext:
-    return HostContext(runner=FakeRunner(results or {}), files=FakeFiles(files or {}))
+    kwargs: dict[str, object] = {}
+    if network is not None:
+        kwargs["network"] = network
+    return HostContext(
+        runner=FakeRunner(results or {}),
+        files=FakeFiles(files or {}),
+        allow_outbound=allow_outbound,
+        **kwargs,  # type: ignore[arg-type]
+    )

@@ -38,3 +38,11 @@ real output**. The fixtures contain a made-up hostname and process names on
 purpose, so tests can prove they never reach a fact. Open questions: whether
 `journalctl -g` exits non-zero on no match on the Ubuntu versions in the support
 matrix, and the exact `NVRM: Xid` wording on newer drivers.
+
+## network/
+
+`/etc/resolv.conf` variants for the `network` collector: `resolv_systemd.conf`
+(systemd-resolved stub), `resolv_public.conf`, `resolv_private_and_ipv6.conf`,
+`resolv_empty.conf`, `resolv_junk.conf` (invalid entries that must be ignored).
+Written from the documented format, **unverified against real files**. All
+addresses are public documentation or well-known resolver addresses.

@@ -45,6 +45,11 @@ def format_fact(fact: Fact) -> str:
 @app.command()
 def collect(
     name: str = typer.Argument(..., help="Collector to run, for example: system"),
+    allow_outbound: bool = typer.Option(
+        False,
+        "--allow-outbound",
+        help="Allow probes that connect to third-party servers. Off by default.",
+    ),
 ) -> None:
     """Run one collector and print the facts it read. Read-only."""
     try:
@@ -52,5 +57,9 @@ def collect(
     except UnknownCollectorError as exc:
         typer.echo(f"error: {safe_text(str(exc))}", err=True)
         raise typer.Exit(2) from exc
-    for fact in run_collectors(collectors, default_context()):
+    if allow_outbound:
+        for collector in collectors:
+            for line in collector.outbound_notice():
+                typer.echo(safe_text(line), err=True)
+    for fact in run_collectors(collectors, default_context(allow_outbound)):
         typer.echo(format_fact(fact))

@@ -31,6 +31,10 @@ class Collector(ABC):
     def collect(self, ctx: HostContext) -> list[Fact]:
         """Return facts. Failures become facts with a non-ok status."""
 
+    def outbound_notice(self) -> list[str]:
+        """Lines to show before this collector's opt-in outbound probes run."""
+        return []
+
     def fact(
         self,
         key: str,

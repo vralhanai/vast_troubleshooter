@@ -30,7 +30,7 @@ def test_collect_system_prints_facts(monkeypatch: pytest.MonkeyPatch) -> None:
             "/proc/uptime": "3600.25 7000.5\n",
         },
     )
-    monkeypatch.setattr(cli, "default_context", lambda: ctx)
+    monkeypatch.setattr(cli, "default_context", lambda allow_outbound=False: ctx)
     result = runner.invoke(app, ["collect", "system"])
     assert result.exit_code == 0
     assert "system.os_version_id = 24.04 [ok]" in result.stdout

@@ -14,7 +14,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 5:** `gpu` and `driver` collectors (real-host fixtures still open)
 - [x] **Step 6:** `docker` collector (Linux capture still open)
 - [x] **Step 7:** `kernel_log` collector (real-host captures still open)
-- [ ] **Step 8:** `network` collector
+- [x] **Step 8:** `network` collector (Linux run still open)
 - [ ] **Step 9:** `vast_host` collector
 - [ ] **Step 10:** `disk` collector
 - [ ] **Step 11:** Rule engine and first rules
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 8 verification (2026-11-23): `uv run pytest` 189 passed; ruff check and format clean. Added `collectors/network.py`, `netaccess.py` (a `NetworkAccess` interface with a real `LocalNetwork` and a `NoNetwork` default that fails loudly), `FakeNetwork` in `testing.py`, `/etc/resolv.conf` on the file allowlist, and `collect --allow-outbound`. `HostContext` gained `network` and `allow_outbound`; the default context has no network, so a collector that reaches for it by mistake fails visibly instead of silently going online. Decisions: a DNS failure or hang is an observation (`network.dns_vast_ai_resolves = False`, status ok), because the Vast docs list both as failures; resolved addresses are never stored; nameserver addresses live only in `raw_excerpt` (local), and the shareable facts are counts (total, loopback, public), so no address leaves the host in a report; `getaddrinfo` has no timeout so it runs on a daemon thread that is abandoned on timeout; outbound probes are two fixed TCP connects (1.1.1.1:443, 8.8.8.8:53, 3s each) that send no data, and the notice listing them and what they reveal goes to stderr so stdout stays parseable; `network.outbound_probes_enabled` records whether they ran, and probe facts are absent when they did not. Real run on this Windows machine: DNS resolves, both probes connect, resolv.conf is `missing`. Not yet run on Linux.
 
 Step 7 verification (2026-11-23): `uv run pytest` 160 passed; ruff check and format clean. Added `collectors/kernel_log.py`, operations `kernel.journal` (`journalctl -k -b --no-pager -o short-iso --case-sensitive=no -g 'NVRM|AER:|PCIe Bus Error|I/O error|EXT4-fs error'`) and `kernel.dmesg` (`dmesg -T`), both marked needs-root, and `FactStatus.NEEDS_ROOT` (the runner's needs-root result now maps to it instead of a generic error, so the CLI can later say 'run with elevated reads for a complete diagnosis'). Facts are counts, Xid codes (with per-code counts and a distinct-device count), AER corrected/uncorrected/fatal counts, I/O error count, first/last time seen, the source (`journalctl_current_boot` or `dmesg`), and a `truncated` flag; a test proves hostnames, process names, PCI addresses, and message text never reach a fact. Decisions: both sources need root because journalctl as a normal user can show only that user's messages, which would look like a clean log; an unreadable log is never reported as zero errors; AER events are counted from the 'error received' header lines, falling back to the `PCIe Bus Error: severity=` lines only when no headers exist, so one event is not counted twice; plain 'pcie' lines are not matched (too noisy), only AER and the storage patterns from the SSD health page. On this Windows machine `collect kernel_log` reports `missing`. Fixtures are written from documented message shapes, not captured from a real host.
 
@@ -235,15 +237,16 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Check DNS and outbound connectivity, without a shell.
 
 **Scope:**
-- [ ] DNS: resolve `vast.ai` with `socket.getaddrinfo`. Timeout-bounded.
-- [ ] Outbound probes are **off by default**. They run only with `--allow-outbound`. Before running, the command lists the destinations and what each probe reveals. Probes are bounded in time and count, and send no credentials. The probes are TCP connects to `1.1.1.1:443` and `8.8.8.8:53`.
-- [ ] Reads `/etc/resolv.conf` and reports the configured nameservers as facts.
-- [ ] No ping and no HTTP call in this step. The `curl -4 ifconfig.me` check from the Vast docs is deferred (it sends the host's public IP to a third party, so it needs an explicit user choice).
-- [ ] Ports (5 per GPU) are **not** checked in this step.
+- [x] DNS: resolve `vast.ai` with `socket.getaddrinfo`. Timeout-bounded.
+- [x] Outbound probes are **off by default**. They run only with `--allow-outbound`. Before running, the command lists the destinations and what each probe reveals. Probes are bounded in time and count, and send no credentials. The probes are TCP connects to `1.1.1.1:443` and `8.8.8.8:53`.
+- [x] Reads `/etc/resolv.conf` and reports the configured nameservers as facts.
+- [x] No ping and no HTTP call in this step. The `curl -4 ifconfig.me` check from the Vast docs is deferred (it sends the host's public IP to a third party, so it needs an explicit user choice).
+- [x] Ports (5 per GPU) are **not** checked in this step.
 
 **Verify:**
-- [ ] Tests with the DNS and TCP calls behind a fake resolver and fake socket. No real network needed.
-- [ ] Manual: run on the Windows machine and on Linux, check the facts match what you expect.
+- [x] Tests with the DNS and TCP calls behind a fake resolver and fake socket. No real network needed.
+- [x] Manual, Windows: default run and `--allow-outbound` run behave as expected (DNS resolves, both probes connect, `/etc/resolv.conf` reports `missing`).
+- [ ] Manual, Linux: run on an Ubuntu host and check the facts (needs a host, see blockers).
 
 **Commit:** `feat(collectors): add network collector for DNS and outbound reachability`
 
