@@ -107,6 +107,12 @@ def render_human(diagnosis: Diagnosis, console: Console) -> None:
         f"{counts['pass']} ok, {counts['unknown']} could not be checked, "
         f"{counts['skipped']} not applicable."
     )
+    rental = facts.get("rentals.state")
+    if rental is not None and rental.value is not None:
+        out(
+            f"Rental state: {rental.value}"
+            + (" (disruptive fixes are blocked)" if rental.value != "none" else "")
+        )
     findings = diagnosis.findings
     out()
     if not findings:

@@ -19,13 +19,15 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 10:** `disk` collector (real-host output still open)
 - [x] **Step 11:** Rule engine and first rules (Secure Boot rule deferred)
 - [x] **Step 12:** `diagnose` command (Linux run still open)
-- [ ] **Step 13:** Rental detection
+- [x] **Step 13:** Rental detection (interim, fail-closed; real-host work still open)
 - [ ] **Step 14:** Fix engine (dry run, confirm, undo)
 - [ ] **Step 15:** First fix set
 - [ ] **Step 16:** Reports and redaction
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 13 verification (2026-11-23): `uv run pytest` 418 passed; ruff check and format clean. Built option 2: the state machine and fail-closed rules are real, the evidence is conservative, nothing about Vast internals is guessed. Added `rentals.py` (`RentalState`, `check_rentals`, `assess`, `RentalAssessment.state_at`), `collectors/rentals.py`, the `rentals.docker_ps_all` operation (`docker ps -a --format {{.State}}`, pinned local socket; only container states are read, never names, ids, images, environment or logs), `docs/rental-detection.md`, and a 'Rental state' line in `diagnose`. Rules: positive evidence always wins; a source that cannot look (missing, permission denied, timeout, truncated, crash) is unknown; `none` needs every required source (containers, vms) to report none; `none` older than 30 s or dated in the future is downgraded to unknown (an old `active` still blocks); only `none` allows a disruptive action, and confirmation never overrides that. The container source treats ANY container in ANY state as a possible rental, so it can over-block (the host's own containers count) but cannot under-block. The VM source is a stub that always returns unknown, so `none` is impossible with the default sources and every disruptive fix is blocked; tests inject sources to exercise the `none` path. What is needed to finish it is listed in the docs file: real captures of `docker ps -a`, how a VM rental appears, the `kaalia.log` tail under each condition, and any status file or socket the daemon exposes.
 
 Step 12 verification (2026-11-23): `uv run pytest` 379 passed; ruff check and format clean. Added `diagnose.py` (`run_diagnosis`, `Diagnosis`, exit-code logic) and the `diagnose` command with `--json`, `--allow-root-reads`, `--allow-outbound`; `rich` is now an explicit dependency (typer already pulled it in). The healthy fixture host gives 14 pass, 1 skipped, exit 0; a host with broken DNS and a stopped service gives exactly those two critical findings, exit 1. Precedence: critical findings (1) beat an incomplete diagnosis (3). Output: findings most severe first, each with summary, category, evidence (fact key, value, status) and what to do; a 'Could not be checked' list shows each undecidable check with the facts that blocked it, a root hint when something needed root, and a plain 'The diagnosis is incomplete' line. When nothing failed but checks were undecidable it says 'No problems found in the checks that ran', never an unqualified all-clear. `--json` prints shareable facts only (no raw excerpts or commands; a test checks this), a schema version, counts, findings, unknowns with reasons, and the exit code; notices for the flags go to stderr so stdout stays pure JSON. With `--allow-root-reads` the command first prints the fixed commands that may run through `sudo -n`. Host text is escaped for Rich markup and stripped of control characters. A rule-file error or an unexpected failure exits 2. `RuleResult` now carries the rule title. Nothing in this command changes the system. Real run on this Windows machine: 2 pass, 12 could not be checked, 1 skipped, exit 3.
 
@@ -357,22 +359,22 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 
 ## Step 13: Rental detection
 
-**Goal:** Decide, on evidence, whether a rental is active. Blocked until a real host or a faithful test host is available.
+**Goal:** Decide, on evidence, whether a rental is active. **Done as an interim, fail-closed version** (the real-host parts are still blocked; see below).
 
 **Scope:**
-- [ ] Investigate candidate sources on a real host (see blockers): daemon log, Docker containers, VM state.
-- [ ] Write a short finding document `docs/rental-detection.md` with what was seen and the chosen method.
-- [ ] Implement `rentals.py` with a `RentalState` result: `active`, `none`, or `unknown`. `none` needs fresh, complete evidence from every supported backend (VM, container, allocated-but-stopped). Missing, stale, unreadable, or conflicting evidence gives `unknown`. `active` and `unknown` both block disruptive fixes, even if the operator confirms.
-- [ ] Add a fact `rentals` to the diagnose output.
+- [ ] Investigate candidate sources on a real host (see blockers): daemon log, Docker containers, VM state. **Still blocked.** No real host has been inspected.
+- [x] Write a short finding document `docs/rental-detection.md`. It records what the Vast docs do and do not say, the interim method, and exactly which samples are needed from a real host.
+- [x] Implement `rentals.py` with a `RentalState` result: `active`, `none`, or `unknown`. `none` needs fresh, complete evidence from every supported backend (VM, container, allocated-but-stopped). Missing, stale, unreadable, or conflicting evidence gives `unknown`. `active` and `unknown` both block disruptive fixes, even if the operator confirms.
+- [x] Add a fact `rentals` to the diagnose output (`rentals.state`, and the line 'Rental state: ...').
 
 **Verify:**
-- [ ] Tests for each state using fixtures from the real host.
-- [ ] Acceptance cases: VM-only activity; stopped but allocated workload; permission failure; stale or conflicting sources; state change between confirmation and mutation; two concurrent fix invocations.
-- [ ] Manual: confirm `unknown` on a host where detection is impossible, and that fixes are blocked.
+- [x] Tests for each state, using injected sources and recorded `docker ps` output. **Still open:** tests built from real-host captures.
+- [x] Acceptance cases covered here: VM-only activity; stopped but allocated workload; permission failure; stale, future-dated, and conflicting sources; a changed state seen by a new check. **Moved to step 14 (fix engine):** the re-check after confirmation and immediately before mutation, and two concurrent fix invocations.
+- [x] Manual: on this Windows machine `collect rentals` and `diagnose` report `unknown` and that disruptive fixes are blocked.
 
 **Commit:** `feat(rentals): add rental detection with active, none, and unknown states`
 
-**Note:** Do not start this step on a guess. If no real host is available, the step waits.
+**Note:** This was built without a real host, so it makes no guess about how a rental looks. The VM source is a stub that always says `unknown`, so the state can never be `none` today and every disruptive fix is blocked. That is deliberate. It becomes useful once real samples exist.
 
 ---
 

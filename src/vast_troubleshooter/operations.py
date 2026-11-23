@@ -130,6 +130,16 @@ _OPERATIONS = (
         needs_root=True,
         timeout=30,
     ),
+    # Rental evidence: only each container's state, never names, ids, images,
+    # environment, or logs. -a includes stopped containers (they can still belong
+    # to a customer).
+    Operation(
+        id="rentals.docker_ps_all",
+        executable="docker",
+        args=("ps", "-a", "--format", "{{.State}}"),
+        docker=True,
+        timeout=20,
+    ),
     # `docker=True`: the runner pins the trusted local socket and refuses
     # environments that point at another daemon.
     Operation(
