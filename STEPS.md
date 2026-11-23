@@ -10,7 +10,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 1:** Project tooling and CLI skeleton (`9b40dd1`)
 - [x] **Step 2:** Core data models (`95c02ca`)
 - [x] **Step 3:** Command runner with allowlist (Linux test run still open, see Step 3 verify)
-- [ ] **Step 4:** Collector framework and `system` collector
+- [x] **Step 4:** Collector framework and `system` collector (Linux run still open)
 - [ ] **Step 5:** `gpu` and `driver` collectors
 - [ ] **Step 6:** `docker` collector
 - [ ] **Step 7:** `kernel_log` collector
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 4 verification (2026-11-23): `uv run pytest` 80 passed; ruff check and format clean. Added `collectors/base.py` (`Collector`, `run_collectors`), `collectors/system.py`, the registry, `files.py` (allowlisted, size-bounded file reads), `context.py` (`HostContext` bundles the runner and file source), `FakeFiles`/`fake_context` in `testing.py`, and the `collect` CLI command (terminal control characters are replaced in output). Design choice: collectors take a `HostContext` instead of just a runner, because `/etc/os-release` and `/proc/uptime` are files, not commands, and need the same allowlist and fake-for-tests treatment. Fixtures are written from documented formats, not captured from a real host (see `tests/fixtures/README.md`). Linux run of `collect system` is still open.
 
 Step 3 verification (2026-11-23): `uv run pytest` 55 passed on Windows; ruff check and format clean. Added `runner.py` (operations by id, no shell, minimal env, timeout kills the process group, bounded output, Docker endpoint policy, needs-root handling), `operations.py` (registry with `system.uname_release`), and `testing.py` (`FakeRunner`). A test caught a real bug: `shutil.which` takes `mode` second, so the search path is now passed by keyword. Not yet run on Linux: the POSIX-only code paths (process-group kill, safe PATH, real sudo) are only covered by planning tests.
 
@@ -155,14 +157,14 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** The plug-in shape for collectors, proven on the simplest one.
 
 **Scope:**
-- [ ] `collectors/base.py`: a `Collector` interface with `name`, `collect(runner) -> list[Fact]`. A failing collector returns error facts. It never raises into the caller.
-- [ ] Collector registry and a runner loop that runs all collectors and keeps going if one fails.
-- [ ] `collectors/system.py`: OS name and version (`/etc/os-release`), kernel version (`uname -r`), uptime.
-- [ ] Fixtures for Ubuntu 22.04 and 24.04.
+- [x] `collectors/base.py`: a `Collector` interface with `name`, `collect(runner) -> list[Fact]`. A failing collector returns error facts. It never raises into the caller.
+- [x] Collector registry and a runner loop that runs all collectors and keeps going if one fails.
+- [x] `collectors/system.py`: OS name and version (`/etc/os-release`), kernel version (`uname -r`), uptime.
+- [x] Fixtures for Ubuntu 22.04 and 24.04.
 
 **Verify:**
-- [ ] Tests: `system` collector against both fixtures; one collector that raises does not stop the others.
-- [ ] Manual: `uv run vast-troubleshooter collect system` prints the facts (on Linux, or with the fake runner on Windows).
+- [x] Tests: `system` collector against both fixtures; one collector that raises does not stop the others.
+- [x] Manual: `uv run vast-troubleshooter collect system` prints the facts. Run on Windows: `os_release` and `uptime` report `missing` (Linux-only files) and `uname` comes from Git Bash, so a real Linux run is still open.
 
 **Commit:** `feat(collectors): add collector framework and system collector`
 

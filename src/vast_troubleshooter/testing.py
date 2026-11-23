@@ -1,7 +1,8 @@
-"""Test helpers. Collector tests use FakeRunner instead of real commands."""
+"""Test helpers. Collector tests use these instead of the real host."""
 
 from collections.abc import Mapping
 
+from vast_troubleshooter.context import HostContext
 from vast_troubleshooter.runner import CommandResult, CommandStatus
 
 
@@ -26,3 +27,28 @@ class FakeRunner:
                 op_id=op_id, status=CommandStatus.OK, returncode=0, stdout=recorded
             )
         return recorded
+
+
+class FakeFiles:
+    """Serves file text by path. A value that is an exception is raised instead.
+
+    A path that is not present raises FileNotFoundError, like a real missing file.
+    """
+
+    def __init__(self, files: Mapping[str, str | Exception]) -> None:
+        self._files = dict(files)
+
+    def read_text(self, path: str) -> str:
+        if path not in self._files:
+            raise FileNotFoundError(path)
+        value = self._files[path]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def fake_context(
+    results: Mapping[str, CommandResult | str] | None = None,
+    files: Mapping[str, str | Exception] | None = None,
+) -> HostContext:
+    return HostContext(runner=FakeRunner(results or {}), files=FakeFiles(files or {}))
