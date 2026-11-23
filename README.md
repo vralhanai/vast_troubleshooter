@@ -80,6 +80,9 @@ Based on public Vast.ai host documentation ([machine offline](https://docs.vast.
 ## 7. Documentation
 
 - [PLAN.md](PLAN.md): three-level plan. Level 1 is the system design. Level 2 is the detailed specification. Level 3 is the working system, starting with the POC.
+- [STEPS.md](STEPS.md): the step-by-step build plan with progress checkboxes.
+- [BACKLOG.md](BACKLOG.md): what was skipped, what is unverified, and what to do once a real Vast host, an Ubuntu machine, or an API key is available.
+- [docs/rental-detection.md](docs/rental-detection.md): how rental detection works today and what is needed to finish it.
 - [LICENSE](LICENSE): MIT.
 
 ## 8. Decisions and open questions
