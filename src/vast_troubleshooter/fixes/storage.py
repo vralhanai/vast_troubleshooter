@@ -15,7 +15,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+from vast_troubleshooter.securefs import NOFOLLOW as _NOFOLLOW
+from vast_troubleshooter.securefs import check_not_symlink as _check_not_symlink
 
 
 def state_dir() -> Path:
@@ -30,11 +31,6 @@ def state_dir() -> Path:
         return Path("/var/lib/vast-troubleshooter")
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / "vast-troubleshooter"
-
-
-def _check_not_symlink(path: Path) -> None:
-    if path.is_symlink():
-        raise OSError(f"refusing to use a symlink: {path.name}")
 
 
 def _prepare(path: Path) -> None:

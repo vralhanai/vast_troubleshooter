@@ -1,6 +1,7 @@
 """Command-line interface for vast-troubleshooter."""
 
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -20,7 +21,15 @@ from vast_troubleshooter.diagnose import (
     run_diagnosis,
 )
 from vast_troubleshooter.fixes import FIXES, FixOutcome, FixStatus, default_fix_engine
+from vast_troubleshooter.fixes.storage import state_dir
 from vast_troubleshooter.models import Fact, Severity
+from vast_troubleshooter.redact import default_redactor
+from vast_troubleshooter.report import (
+    ReportError,
+    make_report_files,
+    read_actions,
+    write_report,
+)
 from vast_troubleshooter.rule_engine import RuleFileError, load_default_rules
 
 app = typer.Typer(
@@ -180,21 +189,8 @@ def to_json(diagnosis: Diagnosis) -> dict[str, object]:
     }
 
 
-@app.command()
-def diagnose(
-    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
-    allow_root_reads: bool = typer.Option(
-        False,
-        "--allow-root-reads",
-        help="Let read-only checks that need root run through a fixed 'sudo -n'.",
-    ),
-    allow_outbound: bool = typer.Option(
-        False,
-        "--allow-outbound",
-        help="Allow probes that connect to third-party servers. Off by default.",
-    ),
-) -> None:
-    """Check this host and report problems. Read-only: nothing is changed."""
+def _collect_diagnosis(allow_root_reads: bool, allow_outbound: bool) -> Diagnosis:
+    """Load the rules, announce any opt-in, and run the diagnosis. Exits 2 on a tool error."""
     try:
         rules = load_default_rules()
     except RuleFileError as exc:
@@ -217,13 +213,31 @@ def diagnose(
         allow_outbound=allow_outbound, allow_elevated=allow_root_reads
     )
     try:
-        diagnosis = run_diagnosis(ctx, rules)
+        return run_diagnosis(ctx, rules)
     except Exception as exc:
         typer.echo(
             f"error: diagnosis failed: {safe_text(type(exc).__name__)}: {safe_text(str(exc))}",
             err=True,
         )
         raise typer.Exit(EXIT_TOOL_ERROR) from exc
+
+
+@app.command()
+def diagnose(
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
+    allow_root_reads: bool = typer.Option(
+        False,
+        "--allow-root-reads",
+        help="Let read-only checks that need root run through a fixed 'sudo -n'.",
+    ),
+    allow_outbound: bool = typer.Option(
+        False,
+        "--allow-outbound",
+        help="Allow probes that connect to third-party servers. Off by default.",
+    ),
+) -> None:
+    """Check this host and report problems. Read-only: nothing is changed."""
+    diagnosis = _collect_diagnosis(allow_root_reads, allow_outbound)
 
     if as_json:
         typer.echo(json.dumps(to_json(diagnosis), indent=2))
@@ -337,3 +351,54 @@ def fix(
         typer.echo(f"error: {safe_text(str(exc))}", err=True)
         raise typer.Exit(EXIT_TOOL_ERROR) from exc
     raise typer.Exit(_FIX_EXIT[outcome.status])
+
+
+@app.command()
+def report(
+    output_dir: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--output-dir",
+        help="Where to write the report files. Default: a private folder in this tool's state directory.",
+    ),
+    show: bool = typer.Option(
+        False, "--show", help="Also print the Markdown report here."
+    ),
+    allow_root_reads: bool = typer.Option(
+        False,
+        "--allow-root-reads",
+        help="Let read-only checks that need root run through a fixed 'sudo -n'.",
+    ),
+    allow_outbound: bool = typer.Option(
+        False,
+        "--allow-outbound",
+        help="Allow probes that connect to third-party servers. Off by default.",
+    ),
+) -> None:
+    """Run the diagnosis and write a redacted report (JSON and Markdown) for Vast Support.
+
+    Nothing is uploaded. Identifying text is always removed; there is no option to
+    keep it. Read the files before you attach them.
+    """
+    diagnosis = _collect_diagnosis(allow_root_reads, allow_outbound)
+    directory = output_dir or state_dir() / "reports"
+    try:
+        actions = read_actions(state_dir() / "actions.jsonl")
+        json_text, markdown = make_report_files(diagnosis, default_redactor(), actions)
+        json_path, md_path = write_report(directory, json_text, markdown)
+    except ReportError as exc:
+        typer.echo(f"error: {safe_text(str(exc))}", err=True)
+        raise typer.Exit(EXIT_TOOL_ERROR) from exc
+
+    typer.echo(
+        "Report written. Nothing was uploaded. Read both files before you share them:"
+    )
+    for path in (json_path, md_path):
+        typer.echo(f"  {safe_text(str(path))}  ({path.stat().st_size} bytes)")
+    counts = diagnosis.counts()
+    typer.echo(
+        f"Diagnosis: {counts['fail']} problem(s), {counts['unknown']} could not be checked"
+        f"{' (incomplete)' if diagnosis.incomplete else ''}."
+    )
+    if show:
+        typer.echo("")
+        typer.echo(markdown)

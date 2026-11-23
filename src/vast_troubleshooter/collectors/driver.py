@@ -30,6 +30,18 @@ class DriverCollector(Collector):
         source = result.source_command or None
         text = f"{result.stdout}\n{result.stderr}"
 
+        # Refused or not allowed to run: nvidia-smi was never run, so nothing was
+        # observed. That is unknown, not "nvidia-smi is failing".
+        if result.status in {CommandStatus.REFUSED, CommandStatus.NEEDS_ROOT}:
+            return [
+                self.failed_from_result(key, result)
+                for key in (
+                    "driver.nvidia_smi_responding",
+                    "driver.version",
+                    "driver.cuda_version",
+                )
+            ]
+
         if result.status is CommandStatus.MISSING:
             return [
                 self.fact(key, status=FactStatus.MISSING, source_command=source)

@@ -369,3 +369,14 @@ def test_cuda_below_11_8_is_comparable_by_code() -> None:
 
 def test_registry_includes_gpu_and_driver() -> None:
     assert {"system", "gpu", "driver"} <= set(COLLECTORS)
+
+
+@pytest.mark.parametrize("status", [CommandStatus.REFUSED, CommandStatus.NEEDS_ROOT])
+def test_a_command_that_was_never_run_is_unknown_not_a_failing_nvidia_smi(
+    status: CommandStatus,
+) -> None:
+    result = CommandResult("driver.smi_summary", status, detail="not run")
+    facts = driver_facts(fake_context(results={"driver.smi_summary": result}))
+    responding = facts["driver.nvidia_smi_responding"]
+    assert responding.value is None
+    assert responding.status is not FactStatus.OK
