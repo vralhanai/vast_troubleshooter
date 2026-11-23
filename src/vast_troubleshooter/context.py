@@ -17,10 +17,12 @@ class HostContext:
     allow_outbound: bool = False
 
 
-def default_context(allow_outbound: bool = False) -> HostContext:
+def default_context(
+    allow_outbound: bool = False, allow_elevated: bool = False
+) -> HostContext:
     """The real host. Tests build a HostContext from fakes instead."""
     return HostContext(
-        runner=SubprocessRunner(READ_OPERATIONS),
+        runner=SubprocessRunner(READ_OPERATIONS, allow_elevated=allow_elevated),
         files=LocalFiles(),
         network=LocalNetwork(),
         allow_outbound=allow_outbound,

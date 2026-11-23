@@ -18,7 +18,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 9:** `vast_host` collector (real-host samples still open)
 - [x] **Step 10:** `disk` collector (real-host output still open)
 - [x] **Step 11:** Rule engine and first rules (Secure Boot rule deferred)
-- [ ] **Step 12:** `diagnose` command
+- [x] **Step 12:** `diagnose` command (Linux run still open)
 - [ ] **Step 13:** Rental detection
 - [ ] **Step 14:** Fix engine (dry run, confirm, undo)
 - [ ] **Step 15:** First fix set
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 12 verification (2026-11-23): `uv run pytest` 379 passed; ruff check and format clean. Added `diagnose.py` (`run_diagnosis`, `Diagnosis`, exit-code logic) and the `diagnose` command with `--json`, `--allow-root-reads`, `--allow-outbound`; `rich` is now an explicit dependency (typer already pulled it in). The healthy fixture host gives 14 pass, 1 skipped, exit 0; a host with broken DNS and a stopped service gives exactly those two critical findings, exit 1. Precedence: critical findings (1) beat an incomplete diagnosis (3). Output: findings most severe first, each with summary, category, evidence (fact key, value, status) and what to do; a 'Could not be checked' list shows each undecidable check with the facts that blocked it, a root hint when something needed root, and a plain 'The diagnosis is incomplete' line. When nothing failed but checks were undecidable it says 'No problems found in the checks that ran', never an unqualified all-clear. `--json` prints shareable facts only (no raw excerpts or commands; a test checks this), a schema version, counts, findings, unknowns with reasons, and the exit code; notices for the flags go to stderr so stdout stays pure JSON. With `--allow-root-reads` the command first prints the fixed commands that may run through `sudo -n`. Host text is escaped for Rich markup and stripped of control characters. A rule-file error or an unexpected failure exits 2. `RuleResult` now carries the rule title. Nothing in this command changes the system. Real run on this Windows machine: 2 pass, 12 could not be checked, 1 skipped, exit 3.
 
 Step 11 verification (2026-11-23): `uv run pytest` 357 passed; ruff check and format clean. Added `rule_engine.py` and 15 rules in `src/vast_troubleshooter/rules/*.toml` (network 2, docker 1, vast_host 1, kernel_log 2, gpu/driver 3, disk 6); a build of the wheel confirmed the TOML files ship as package data. Design: conditions are a closed set (`equals`, `not_equals`, `less_than`, `greater_than`, `contains`, `missing`, `all`, `any`); an unknown condition type, an unknown field, a bad id, or a `fix_id` that is not a plain name is rejected, and a bad file loads nothing. Nesting depth (4), condition count (50), rules (500) and file size (256 KB) are bounded. A rule cannot name a command; `fix_id` is only a name, and the loader can check it against a registry (`known_fix_ids`) once step 14 exists. Evaluation is three-valued: every check is true, false or unknown, and a rule whose inputs could not be read (error, timeout, needs_root, missing, unsupported, or absent) is `unknown`, never `pass`; `all` is false if any part is false and `any` is true if any part is true even when another part is unknown. Each result carries the reasons it was unknown. Additions beyond the written scope: an optional `only_if` condition (a rule is `skipped` when it does not apply, so the opt-in outbound-probe rule is skipped, not unknown, when probes were not run); `other_fact` so a rule can compare two facts (needed for GPU count vs PCI count); `contains` matches whole comma-separated tokens (so Xid `79` does not match `179`); added rules `kernel_log.xid_errors` (warning) beside the Xid 79 rule (critical). Bug found by a test: pydantic `pattern` is an unanchored search, so `id = "Bad Id!"` and a `fix_id` like `rm -rf` were accepted; every pattern is now anchored with `^` and `$`. Thresholds live in the rule files with the Vast page and check date; sizes use decimal gigabytes so a host is not flagged inside the GB/GiB gap. ARM64's CUDA 12.6 minimum is not checked (no architecture fact). The GPU-count rule is a warning because the PCI count can include an integrated NVIDIA display device. Not done: Secure Boot (no collector).
 
@@ -336,17 +338,18 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** The first useful command. Collect, evaluate, and print.
 
 **Scope:**
-- [ ] `vast-troubleshooter diagnose` runs all collectors, evaluates all rules, and prints findings sorted by severity.
-- [ ] Each finding shows its summary, evidence, and recommendation.
-- [ ] Output modes: human (Rich), `--json`.
-- [ ] Flag `--allow-root-reads`: lets collectors use the fixed elevated read operations from step 3. Default off. The tool prints which commands need root.
-- [ ] Exit codes: 0 complete with no critical findings, 1 critical findings, 2 tool error, 3 incomplete (a critical check is `unknown` or `skipped`).
-- [ ] Local only by default. Outbound probes need `--allow-outbound` (step 8).
-- [ ] No fixes in this step.
+- [x] `vast-troubleshooter diagnose` runs all collectors, evaluates all rules, and prints findings sorted by severity.
+- [x] Each finding shows its summary, evidence, and recommendation.
+- [x] Output modes: human (Rich), `--json`.
+- [x] Flag `--allow-root-reads`: lets collectors use the fixed elevated read operations from step 3. Default off. The tool prints which commands need root.
+- [x] Exit codes: 0 complete with no critical findings, 1 critical findings, 2 tool error, 3 incomplete (a critical check is `unknown`). **Changed from the plan:** `skipped` does not count as incomplete, because the critical outbound rule is skipped by design whenever the opt-in probes are off, which would make every default run exit 3.
+- [x] Local only by default. Outbound probes need `--allow-outbound` (step 8).
+- [x] No fixes in this step.
 
 **Verify:**
-- [ ] Tests with the fake runner: end-to-end diagnose run on a healthy fixture set gives no findings. On a failure fixture set (DNS broken, service inactive) gives the expected findings.
-- [ ] Manual: run on Linux, check output.
+- [x] Tests with the fake runner: end-to-end diagnose run on a healthy fixture set gives no findings. On a failure fixture set (DNS broken, service inactive) gives the expected findings.
+- [x] Manual, Windows: runs, exits 3 with every undecidable check listed.
+- [ ] Manual, Linux: run on an Ubuntu host as a normal user, with `sudo`, and with `--allow-root-reads` (needs a host, see blockers).
 
 **Commit:** `feat(cli): add diagnose command`
 

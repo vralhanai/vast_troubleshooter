@@ -259,6 +259,7 @@ class RuleResult:
     status: CheckStatus
     severity: Severity
     category: Category
+    title: str = ""
     finding: Finding | None = None
     # For UNKNOWN: which inputs were not usable, e.g. "kernel_log.xid_count: needs_root".
     reasons: tuple[str, ...] = ()
@@ -345,7 +346,9 @@ def _eval(cond: Condition, facts: Facts) -> tuple[Tri, list[str]]:
 
 def evaluate_rule(rule: Rule, facts: Facts) -> RuleResult:
     def result(status: CheckStatus, **extra: object) -> RuleResult:
-        return RuleResult(rule.id, status, rule.severity, rule.category, **extra)  # type: ignore[arg-type]
+        return RuleResult(
+            rule.id, status, rule.severity, rule.category, rule.title, **extra
+        )  # type: ignore[arg-type]
 
     if rule.only_if is not None:
         applies, reasons = _eval(rule.only_if, facts)
