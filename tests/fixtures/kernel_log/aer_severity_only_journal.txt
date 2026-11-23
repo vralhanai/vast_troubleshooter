@@ -1,0 +1,2 @@
+2026-11-23T09:00:01+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Corrected, type=Physical Layer, (Receiver ID)
+2026-11-23T09:00:02+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Uncorrected (Fatal), type=Transaction Layer, (Requester ID)

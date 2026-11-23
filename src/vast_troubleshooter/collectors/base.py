@@ -14,7 +14,7 @@ _STATUS_MAP = {
     CommandStatus.TIMEOUT: FactStatus.TIMEOUT,
     CommandStatus.ERROR: FactStatus.ERROR,
     CommandStatus.REFUSED: FactStatus.ERROR,
-    CommandStatus.NEEDS_ROOT: FactStatus.ERROR,
+    CommandStatus.NEEDS_ROOT: FactStatus.NEEDS_ROOT,
 }
 
 

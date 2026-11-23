@@ -26,3 +26,15 @@ written from the documented format, **unverified against real output**.
 JSON on stdout with empty fields and `ServerErrors: null`, and the message
 "Cannot connect to the Docker daemon ... Is the docker daemon running?" on
 stderr only. So `ServerErrors` cannot be relied on; the collector also reads stderr.
+
+## kernel_log/
+
+Kernel log text for the `kernel_log` collector: `xid79_journal.txt`,
+`aer_journal.txt`, `aer_severity_only_journal.txt`, `clean_journal.txt`
+(`-- No entries --`), `xid79_dmesg.txt` (`dmesg -T` format, includes I/O errors and
+a day-of-month padded with a space), `clean_dmesg.txt`. Written from documented
+formats and the NVIDIA Xid / kernel AER message shapes, **unverified against
+real output**. The fixtures contain a made-up hostname and process names on
+purpose, so tests can prove they never reach a fact. Open questions: whether
+`journalctl -g` exits non-zero on no match on the Ubuntu versions in the support
+matrix, and the exact `NVRM: Xid` wording on newer drivers.

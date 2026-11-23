@@ -13,7 +13,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 4:** Collector framework and `system` collector (Linux run still open)
 - [x] **Step 5:** `gpu` and `driver` collectors (real-host fixtures still open)
 - [x] **Step 6:** `docker` collector (Linux capture still open)
-- [ ] **Step 7:** `kernel_log` collector
+- [x] **Step 7:** `kernel_log` collector (real-host captures still open)
 - [ ] **Step 8:** `network` collector
 - [ ] **Step 9:** `vast_host` collector
 - [ ] **Step 10:** `disk` collector
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 7 verification (2026-11-23): `uv run pytest` 160 passed; ruff check and format clean. Added `collectors/kernel_log.py`, operations `kernel.journal` (`journalctl -k -b --no-pager -o short-iso --case-sensitive=no -g 'NVRM|AER:|PCIe Bus Error|I/O error|EXT4-fs error'`) and `kernel.dmesg` (`dmesg -T`), both marked needs-root, and `FactStatus.NEEDS_ROOT` (the runner's needs-root result now maps to it instead of a generic error, so the CLI can later say 'run with elevated reads for a complete diagnosis'). Facts are counts, Xid codes (with per-code counts and a distinct-device count), AER corrected/uncorrected/fatal counts, I/O error count, first/last time seen, the source (`journalctl_current_boot` or `dmesg`), and a `truncated` flag; a test proves hostnames, process names, PCI addresses, and message text never reach a fact. Decisions: both sources need root because journalctl as a normal user can show only that user's messages, which would look like a clean log; an unreadable log is never reported as zero errors; AER events are counted from the 'error received' header lines, falling back to the `PCIe Bus Error: severity=` lines only when no headers exist, so one event is not counted twice; plain 'pcie' lines are not matched (too noisy), only AER and the storage patterns from the SSD health page. On this Windows machine `collect kernel_log` reports `missing`. Fixtures are written from documented message shapes, not captured from a real host.
 
 Step 6 verification (2026-11-23): `uv run pytest` 136 passed; ruff check and format clean. Added `collectors/docker.py` and the `docker.info` operation (runs `docker --host unix:///var/run/docker.sock info --format '{{json .}}'`; the runner pins the endpoint and refuses `DOCKER_HOST`/context overrides, tested against the real operation). Decisions: a daemon that is not running is an observation (`docker.daemon_running = False`, status ok); permission denied on the socket, a refused endpoint, and an unparseable answer are unknown (status error), because the daemon may be fine; a hang is `timeout` for every fact. The NVIDIA check is only whether `nvidia` is in the registered runtimes list; it does not prove a GPU container can start. A real run on this Windows machine (Docker 29.9.3, pinned to a Unix socket that does not exist) showed that `docker info` exits 1 with `ServerErrors: null` and the message on stderr only, so the collector also reads stderr and a fixture records that shape. The Docker-running fixtures are still written from the documented format.
 
@@ -215,13 +217,14 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Find GPU and bus errors in the kernel log.
 
 **Scope:**
-- [ ] Reads `journalctl -k -b --no-pager` and falls back to `dmesg -T` if journalctl is missing. Both may need root. The collector reports "needs root" as a fact if it cannot read them.
-- [ ] Extracts lines matching `nvrm`, `xid`, `aer`, `pcie`, and I/O errors from the SSD health page patterns.
-- [ ] Facts hold bounded, typed evidence: Xid code, count, first and last timestamp, and boot scope. Raw matched lines are not stored in facts or reports. Findings are limited to the current boot or a stated time window, and recurrence is reported.
-- [ ] Fixtures: a log with Xid 79 (GPU fell off bus), a log with AER errors, a clean log.
+- [x] Reads `journalctl -k -b --no-pager` and falls back to `dmesg -T` if journalctl is missing. Both may need root. The collector reports "needs root" as a fact if it cannot read them.
+- [x] Extracts lines matching `nvrm`, `xid`, `aer`, `pcie`, and I/O errors from the SSD health page patterns.
+- [x] Facts hold bounded, typed evidence: Xid code, count, first and last timestamp, and boot scope. Raw matched lines are not stored in facts or reports. Findings are limited to the current boot or a stated time window, and recurrence is reported.
+- [x] Fixtures: a log with Xid 79 (GPU fell off bus), a log with AER errors, a clean log.
 
 **Verify:**
-- [ ] Tests for each fixture, plus the root-missing case.
+- [x] Tests for each fixture, plus the root-missing case (and: journalctl missing/failed/hung falls back to dmesg, both missing, truncated output, no raw log text in any fact).
+- [ ] Real captures from an Ubuntu host: `journalctl -g` exit code on no match, and real `NVRM: Xid` and AER wording on the supported Ubuntu and driver versions. Needs a host (see blockers).
 
 **Commit:** `feat(collectors): add kernel_log collector for NVRM, Xid, and AER`
 

@@ -6,6 +6,7 @@ from vast_troubleshooter.collectors.base import Collector, run_collectors
 from vast_troubleshooter.collectors.docker import DockerCollector
 from vast_troubleshooter.collectors.driver import DriverCollector
 from vast_troubleshooter.collectors.gpu import GpuCollector
+from vast_troubleshooter.collectors.kernel_log import KernelLogCollector
 from vast_troubleshooter.collectors.system import SystemCollector
 
 __all__ = [
@@ -18,7 +19,13 @@ __all__ = [
 
 COLLECTORS: dict[str, Collector] = {
     c.name: c
-    for c in (SystemCollector(), GpuCollector(), DriverCollector(), DockerCollector())
+    for c in (
+        SystemCollector(),
+        GpuCollector(),
+        DriverCollector(),
+        DockerCollector(),
+        KernelLogCollector(),
+    )
 }
 
 

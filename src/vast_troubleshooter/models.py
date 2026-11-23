@@ -28,6 +28,7 @@ class FactStatus(StrEnum):
     ERROR = "error"  # the read failed
     TIMEOUT = "timeout"  # the read took too long
     UNSUPPORTED = "unsupported"  # the hardware or software does not provide it
+    NEEDS_ROOT = "needs_root"  # not read: needs elevated rights that are off
 
 
 class CheckStatus(StrEnum):

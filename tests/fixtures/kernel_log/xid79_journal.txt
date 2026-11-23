@@ -1,0 +1,4 @@
+2026-11-23T10:15:42+0000 gpu-host kernel: NVRM: Xid (PCI:0000:3a:00): 79, pid=12345, name=python3, GPU has fallen off the bus.
+2026-11-23T10:15:42+0000 gpu-host kernel: NVRM: GPU 0000:3a:00.0: GPU has fallen off the bus.
+2026-11-23T10:15:43+0000 gpu-host kernel: NVRM: Xid (PCI:0000:3a:00): 79, pid='<unknown>', name=<unknown>, GPU has fallen off the bus.
+2026-11-23T11:00:00+0000 gpu-host kernel: NVRM: Xid (PCI:0000:5d:00): 13, pid=777, name=trainer, Graphics Exception: ESR 0x404600=0x80000002

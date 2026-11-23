@@ -1,0 +1,7 @@
+[Mon Nov 23 08:00:01 2026] Linux version 6.8.0-45-generic (buildd@lcy02-amd64-051) (x86_64-linux-gnu-gcc-13)
+[Mon Nov 23 08:00:05 2026] nvme nvme0: pci function 0000:04:00.0
+[Mon Nov  3 10:15:42 2026] NVRM: Xid (PCI:0000:3a:00): 79, pid=12345, name=python3, GPU has fallen off the bus.
+[Mon Nov 23 10:20:00 2026] blk_update_request: I/O error, dev nvme0n1, sector 12345 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 2
+[Mon Nov 23 10:20:00 2026] Buffer I/O error on dev nvme0n1p2, logical block 1, async page read
+[Mon Nov 23 10:21:00 2026] EXT4-fs error (device nvme0n1p2): ext4_find_entry:1455: inode #2: comm ls: reading directory lblock 0
+[Mon Nov 23 10:22:00 2026] audit: type=1400 audit(1700000000.000:2): apparmor="STATUS" operation="profile_load"

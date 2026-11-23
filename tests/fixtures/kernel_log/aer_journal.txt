@@ -1,0 +1,8 @@
+2026-11-23T09:00:01+0000 gpu-host kernel: pcieport 0000:00:01.1: AER: Corrected error received: 0000:01:00.0
+2026-11-23T09:00:01+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Corrected, type=Physical Layer, (Receiver ID)
+2026-11-23T09:10:00+0000 gpu-host kernel: pcieport 0000:00:01.1: AER: Multiple Corrected error received: 0000:01:00.0
+2026-11-23T09:10:00+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Corrected, type=Data Link Layer, (Transmitter ID)
+2026-11-23T09:30:00+0000 gpu-host kernel: pcieport 0000:00:01.1: AER: Uncorrected (Non-Fatal) error received: 0000:01:00.0
+2026-11-23T09:30:00+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Uncorrected (Non-Fatal), type=Transaction Layer, (Requester ID)
+2026-11-23T09:45:00+0000 gpu-host kernel: pcieport 0000:00:01.1: AER: Uncorrected (Fatal) error received: 0000:01:00.0
+2026-11-23T09:45:00+0000 gpu-host kernel: pcieport 0000:00:01.1: PCIe Bus Error: severity=Uncorrected (Fatal), type=Transaction Layer, (Requester ID)
