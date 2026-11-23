@@ -17,7 +17,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 8:** `network` collector (Linux run still open)
 - [x] **Step 9:** `vast_host` collector (real-host samples still open)
 - [x] **Step 10:** `disk` collector (real-host output still open)
-- [ ] **Step 11:** Rule engine and first rules
+- [x] **Step 11:** Rule engine and first rules (Secure Boot rule deferred)
 - [ ] **Step 12:** `diagnose` command
 - [ ] **Step 13:** Rental detection
 - [ ] **Step 14:** Fix engine (dry run, confirm, undo)
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 11 verification (2026-11-23): `uv run pytest` 357 passed; ruff check and format clean. Added `rule_engine.py` and 15 rules in `src/vast_troubleshooter/rules/*.toml` (network 2, docker 1, vast_host 1, kernel_log 2, gpu/driver 3, disk 6); a build of the wheel confirmed the TOML files ship as package data. Design: conditions are a closed set (`equals`, `not_equals`, `less_than`, `greater_than`, `contains`, `missing`, `all`, `any`); an unknown condition type, an unknown field, a bad id, or a `fix_id` that is not a plain name is rejected, and a bad file loads nothing. Nesting depth (4), condition count (50), rules (500) and file size (256 KB) are bounded. A rule cannot name a command; `fix_id` is only a name, and the loader can check it against a registry (`known_fix_ids`) once step 14 exists. Evaluation is three-valued: every check is true, false or unknown, and a rule whose inputs could not be read (error, timeout, needs_root, missing, unsupported, or absent) is `unknown`, never `pass`; `all` is false if any part is false and `any` is true if any part is true even when another part is unknown. Each result carries the reasons it was unknown. Additions beyond the written scope: an optional `only_if` condition (a rule is `skipped` when it does not apply, so the opt-in outbound-probe rule is skipped, not unknown, when probes were not run); `other_fact` so a rule can compare two facts (needed for GPU count vs PCI count); `contains` matches whole comma-separated tokens (so Xid `79` does not match `179`); added rules `kernel_log.xid_errors` (warning) beside the Xid 79 rule (critical). Bug found by a test: pydantic `pattern` is an unanchored search, so `id = "Bad Id!"` and a `fix_id` like `rm -rf` were accepted; every pattern is now anchored with `^` and `$`. Thresholds live in the rule files with the Vast page and check date; sizes use decimal gigabytes so a host is not flagged inside the GB/GiB gap. ARM64's CUDA 12.6 minimum is not checked (no architecture fact). The GPU-count rule is a warning because the PCI count can include an integrated NVIDIA display device. Not done: Secure Boot (no collector).
 
 Step 10 verification (2026-11-23): `uv run pytest` 256 passed; ruff check and format clean. Added `collectors/disk.py` and operations `disk.df`, `disk.findmnt_root`, `disk.lsblk`, `disk.smart_x`. Deviations from the written scope, each deliberate: (1) space comes from `df -P -B1` through the runner instead of `psutil`, so it is fakeable in tests and needs no new dependency; sizes are reported in bytes (unit `B`) to avoid a GB/GiB ambiguity against Vast's '20 GB' and '200 GB'; (2) SMART uses `smartctl -x` only, because it already prints the overall-health line, so `-H` and `nvme smart-log` would be duplicate calls; (3) added `disk.root_mounted_rw` (`findmnt -no OPTIONS /`), which the step 11 rule 'root not mounted read-write' needs, and aggregate facts (`smart_failed_count`, `nvme_critical_warning_count`, `nvme_media_errors_total`, `sata_reallocated_total`, `sata_pending_total`, `sata_uncorrectable_total`, `hdd_count`) because the planned rule language cannot aggregate; aggregates are absent when no drive's SMART could be read, so unreadable never looks healthy. smartctl's exit code is a bitmask (8 means FAILED), so its output is parsed even when the code is non-zero; a test caught a bug where smartctl's own error text ('Smartctl open device ... failed') was mistaken for SMART data because the check matched the substring 'smart'; it now requires the whole word. The trusted-enumeration check promised in step 3 is done: `smartctl` is only run for names that came from `lsblk`, are on a physical transport (nvme/sata/sas), and match `/dev/(nvme\d+n\d+|sd[a-z]{1,3})`; the Docker dir passed to `df` comes from `docker info` and must be a plain absolute path. No self-test option exists in any operation, and a test enforces that. Serial numbers are never kept. RAID controllers are out of scope. On this Windows machine `collect disk` reports real root space, and `missing` for the rest.
 
@@ -299,10 +301,10 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Turn facts into findings, using rules stored as data.
 
 **Scope:**
-- [ ] Rules are TOML files shipped in the package (`rules/*.toml`). Each rule has an id, title, conditions on facts, severity, category, recommendation, and optional `fix_id`.
-- [ ] Conditions are a small, fixed set: equals, not equals, less than, greater than, contains, missing, and/or. No code execution in rules.
-- [ ] Rule loader validates the TOML with pydantic and rejects unknown condition types.
-- [ ] First rules, from the verified requirements in PLAN.md:
+- [x] Rules are TOML files shipped in the package (`rules/*.toml`). Each rule has an id, title, conditions on facts, severity, category, recommendation, and optional `fix_id`.
+- [x] Conditions are a small, fixed set: equals, not equals, less than, greater than, contains, missing, and/or. No code execution in rules.
+- [x] Rule loader validates the TOML with pydantic and rejects unknown condition types.
+- [x] First rules, from the verified requirements in PLAN.md:
   - DNS for `vast.ai` fails.
   - Outbound TCP fails.
   - Docker NVIDIA runtime missing.
@@ -317,13 +319,13 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
   - SMART overall health not PASSED.
   - NVMe critical warning not `0x00`, or media errors above 0.
   - SATA reallocated or pending sectors above 0.
-  - Secure Boot enabled. *(Needs a new collector. Added here as a rule only if the collector exists. Otherwise, a later step.)*
-- [ ] Thresholds live in the rule files with a comment naming the Vast page they come from.
+  - Secure Boot enabled. **Not done:** there is no Secure Boot collector yet, so no rule. It needs its own collector step (see open items).
+- [x] Thresholds live in the rule files with a comment naming the Vast page they come from.
 
 **Verify:**
-- [ ] Each rule has a passing and a failing fixture (tests).
-- [ ] Loader rejects a malformed rule file (test).
-- [ ] Rule evaluation is deterministic (same facts, same findings).
+- [x] Each rule has a passing and a failing fixture (tests).
+- [x] Loader rejects a malformed rule file (test).
+- [x] Rule evaluation is deterministic (same facts, same findings).
 
 **Commit:** `feat(rules): add rule engine and first diagnosis rules`
 
@@ -493,6 +495,6 @@ Not in the first set, because they are disruptive or unverified: controller rese
 - The support matrix (Ubuntu versions and driver branches) is not decided. Vast's driver table is now known (checked 2026-11-23), so the matrix only needs to choose which rows the POC supports.
 - Python 3.15 availability in `uv` is checked in step 1. If it is not available, the Python pin needs a decision before step 2.
 - The design review said Understanding Verification splits newly evaluated from previously verified machines. Checked 2026-11-23: the page does not say that, so no such rule is planned.
-- Secure Boot and SSH checks need collectors that are not in the steps above yet. They can be added as a new step before step 11, if confirmed.
+- Secure Boot and SSH checks need collectors that are not in the steps above yet (the Secure Boot rule from step 11 is waiting on one). They can be added as a new step before step 11, if confirmed.
 - The "Understanding Verification" page and the host setup guide have not been read. They may change thresholds or add checks.
 - Rental detection (step 13) is blocked on real host access.

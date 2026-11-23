@@ -1,0 +1,15 @@
+schema_version = 1
+
+[[rule]]
+id = "docker.nvidia_runtime_missing"
+title = "Docker is running but the NVIDIA runtime is not registered"
+severity = "critical"
+category = "unverified"
+recommendation = "GPU containers cannot start without the NVIDIA container runtime. Install nvidia-container-toolkit and register it with Docker. (Registration alone does not prove a GPU container can start.)"
+source = "https://docs.vast.ai/host/verification-stages"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "docker.nvidia_runtime_present"
+value = false

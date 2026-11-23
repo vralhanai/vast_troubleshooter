@@ -1,0 +1,37 @@
+schema_version = 1
+
+[[rule]]
+id = "kernel_log.xid_errors"
+title = "NVIDIA Xid errors were logged this boot"
+severity = "warning"
+category = "performance"
+recommendation = "Xid codes are NVIDIA hardware and driver error codes. Look up the codes reported, and check the driver version, power supply, and risers. Some Xids come from user code and are harmless."
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "greater_than"
+fact = "kernel_log.xid_count"
+value = 0
+
+[[rule]]
+id = "kernel_log.xid_79_gpu_fell_off_bus"
+title = "A GPU fell off the PCIe bus (Xid 79)"
+severity = "critical"
+category = "offline"
+recommendation = "Xid 79 means the GPU stopped responding on the bus. Common causes are power, a bad riser or slot, overheating, or a driver fault. A reboot is usually needed, so wait until no rentals are active."
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "all"
+
+[[rule.when.of]]
+type = "greater_than"
+fact = "kernel_log.xid_count"
+value = 0
+
+[[rule.when.of]]
+type = "contains"
+fact = "kernel_log.xid_codes"
+value = "79"

@@ -1,0 +1,16 @@
+schema_version = 1
+
+[[rule]]
+id = "vast_host.service_not_active"
+title = "vastai.service is not running"
+severity = "critical"
+category = "offline"
+recommendation = "Check 'sudo systemctl status vastai' and the daemon log. If the unit does not exist, the Vast hosting software is not installed. Do not restart it while customer rentals are active."
+fix_id = "restart-vast-daemon"
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "vast_host.service_active"
+value = false

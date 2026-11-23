@@ -1,0 +1,44 @@
+schema_version = 1
+
+[[rule]]
+id = "gpu.nvidia_smi_failing"
+title = "nvidia-smi is failing or hanging"
+severity = "critical"
+category = "offline"
+recommendation = "Vast needs a working nvidia-smi that lists every GPU. Check the driver is loaded, the driver and library versions match, and the kernel log for Xid errors."
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "driver.nvidia_smi_responding"
+value = false
+
+[[rule]]
+id = "gpu.count_below_pci_count"
+title = "nvidia-smi lists fewer GPUs than the PCIe bus shows"
+severity = "warning"
+category = "offline"
+recommendation = "A GPU may have dropped off the bus or lost its driver. Check the kernel log for Xid 79 and PCIe errors, power, and risers. (The PCIe count can include an integrated NVIDIA display device.)"
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "less_than"
+fact = "gpu.count"
+other_fact = "gpu.pci_count"
+
+[[rule]]
+id = "driver.cuda_below_11_8"
+title = "CUDA version is below the Vast minimum (11.8)"
+severity = "critical"
+category = "unverified"
+recommendation = "Update the NVIDIA driver so it supports CUDA 11.8 or newer. (On ARM64 the minimum is 12.6; that is not checked yet because there is no architecture fact.)"
+source = "https://docs.vast.ai/host/verification-stages"
+checked = "2026-11-23"
+
+# CUDA's own integer encoding: major * 1000 + minor * 10, so 11.8 is 11080.
+[rule.when]
+type = "less_than"
+fact = "driver.cuda_version_code"
+value = 11080

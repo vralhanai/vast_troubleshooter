@@ -1,0 +1,44 @@
+schema_version = 1
+
+[[rule]]
+id = "network.dns_vast_ai_unresolvable"
+title = "DNS cannot resolve vast.ai"
+severity = "critical"
+category = "offline"
+recommendation = "The Vast daemon reaches Vast by name, so a broken resolver keeps the host offline. Check /etc/resolv.conf and the resolver service, or try a public resolver such as 1.1.1.1."
+fix_id = "fix-dns-resolver"
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "network.dns_vast_ai_resolves"
+value = false
+
+[[rule]]
+id = "network.outbound_tcp_blocked"
+title = "Outbound TCP connections to both test servers failed"
+severity = "critical"
+category = "offline"
+recommendation = "No outbound connectivity was seen. Check the gateway, firewall, proxy or VPN settings, and cabling."
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+# Only judged when the opt-in outbound probes were run.
+[rule.only_if]
+type = "equals"
+fact = "network.outbound_probes_enabled"
+value = true
+
+[rule.when]
+type = "all"
+
+[[rule.when.of]]
+type = "equals"
+fact = "network.outbound_cloudflare_443"
+value = false
+
+[[rule.when.of]]
+type = "equals"
+fact = "network.outbound_google_dns_53"
+value = false

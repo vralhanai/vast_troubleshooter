@@ -1,0 +1,104 @@
+schema_version = 1
+
+# Sizes are bytes. Vast says "20 GB" and "200 GB"; decimal gigabytes are used so
+# a host is never flagged for being in the gap between GB and GiB.
+
+[[rule]]
+id = "disk.root_free_below_20gb"
+title = "Less than 20 GB free on the root partition"
+severity = "critical"
+category = "unverified"
+recommendation = "Free space on the root partition, for example by cleaning old Docker images and logs."
+source = "https://docs.vast.ai/host/verification-stages"
+checked = "2026-11-23"
+
+[rule.when]
+type = "less_than"
+fact = "disk.root_free_bytes"
+value = 20_000_000_000
+
+[[rule]]
+id = "disk.docker_storage_below_200gb"
+title = "The Docker storage drive is smaller than 200 GB"
+severity = "critical"
+category = "unverified"
+recommendation = "Vast requires a dedicated Docker storage drive of at least 200 GB."
+source = "https://docs.vast.ai/host/verification-stages"
+checked = "2026-11-23"
+
+[rule.when]
+type = "less_than"
+fact = "disk.docker_dir_total_bytes"
+value = 200_000_000_000
+
+[[rule]]
+id = "disk.root_not_writable"
+title = "The root filesystem is mounted read-only"
+severity = "critical"
+category = "unverified"
+recommendation = "The kernel usually remounts a filesystem read-only after disk errors. Check the kernel log and the drive's SMART health before anything else."
+source = "https://docs.vast.ai/host/ssd-health"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "disk.root_mounted_rw"
+value = false
+
+[[rule]]
+id = "disk.smart_health_failed"
+title = "A drive reports a failed SMART health assessment"
+severity = "critical"
+category = "unverified"
+recommendation = "Stop renting the machine, back up data, and replace the drive. A failing drive can cost verification even when the host looks healthy."
+source = "https://docs.vast.ai/host/ssd-health"
+checked = "2026-11-23"
+
+[rule.when]
+type = "greater_than"
+fact = "disk.smart_failed_count"
+value = 0
+
+[[rule]]
+id = "disk.nvme_unhealthy"
+title = "An NVMe drive reports a critical warning or media errors"
+severity = "critical"
+category = "unverified"
+recommendation = "Critical Warning should be 0x00 and Media and Data Integrity Errors should be 0. Back up data and plan to replace the drive."
+source = "https://docs.vast.ai/host/ssd-health"
+checked = "2026-11-23"
+
+[rule.when]
+type = "any"
+
+[[rule.when.of]]
+type = "greater_than"
+fact = "disk.nvme_critical_warning_count"
+value = 0
+
+[[rule.when.of]]
+type = "greater_than"
+fact = "disk.nvme_media_errors_total"
+value = 0
+
+[[rule]]
+id = "disk.sata_bad_sectors"
+title = "A SATA drive has reallocated or pending sectors"
+severity = "warning"
+category = "unverified"
+recommendation = "Reallocated and pending sector counts should be 0. A rising count means the drive is failing: back up data and plan to replace it."
+source = "https://docs.vast.ai/host/ssd-health"
+checked = "2026-11-23"
+
+[rule.when]
+type = "any"
+
+[[rule.when.of]]
+type = "greater_than"
+fact = "disk.sata_reallocated_total"
+value = 0
+
+[[rule.when.of]]
+type = "greater_than"
+fact = "disk.sata_pending_total"
+value = 0
