@@ -20,12 +20,14 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 11:** Rule engine and first rules (Secure Boot rule deferred)
 - [x] **Step 12:** `diagnose` command (Linux run still open)
 - [x] **Step 13:** Rental detection (interim, fail-closed; real-host work still open)
-- [ ] **Step 14:** Fix engine (dry run, confirm, undo)
+- [x] **Step 14:** Fix engine (dry run, confirm, undo) (Linux-only checks still open)
 - [ ] **Step 15:** First fix set
 - [ ] **Step 16:** Reports and redaction
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 14 verification (2026-11-23): `uv run pytest` 467 passed, 1 skipped (the POSIX-only permissions and symlink test); ruff check and format clean. Added `fixes/` (`base.py`: `Fix`, `FixOutcome`, `FixStatus`; `engine.py`: `FixEngine`; `storage.py`: `ProcessLock`, `ActionLog`, `state_dir`; `registry.py`: empty `FIXES` and `MUTATION_OPERATIONS`) and `FakeMutationRunner` in `testing.py`. No fix is wired up. The mutation allowlist is a separate registry run by a separate `SubprocessRunner`, so the read runner can never run a mutation and the reverse (tested). Order of checks, each stopping the run with a reason and nothing changed: whitelist, root, rental state `none`, the problem the fix resolves is actually present; then dry run is the default and stops there; apply needs the fix id typed exactly (case, spaces and prefixes all rejected); then the lock, then the action log must be writable (no unlogged change, ever), then the rental state and the problem are checked again immediately before the change. Each command runs in order and stops at the first failure; afterwards the affected collectors run again and the fix's rule must pass. The result is judged by what is observed afterwards: a timeout becomes succeeded, failed or indeterminate depending on what the re-check shows, and an unobservable result is indeterminate, never success. The action log is JSON lines with one run id per run and only fixed values (ids, allowlisted commands, statuses, exit codes, undo notes); command output is never stored (tested). Files are created owner-only and never through a symlink. The lock is held by the OS (`flock`; `msvcrt` on Windows) so a crash cannot leave it stuck. It serializes this tool's own runs only, and nothing claims it stops Vast from assigning a workload. State lives in `/var/lib/vast-troubleshooter` when root, else the user's state directory, so a root run and a non-root run do not share a lock. Two tests caught mistakes in my own tests (a missing fixed clock made fresh evidence look stale), not engine bugs. With the real rental check the VM stub makes the state unknown, so every apply is blocked today (tested). There is no `fix` CLI command yet; the typed-confirmation prompt and the command arrive with the first fixes in step 15.
 
 Step 13 verification (2026-11-23): `uv run pytest` 418 passed; ruff check and format clean. Built option 2: the state machine and fail-closed rules are real, the evidence is conservative, nothing about Vast internals is guessed. Added `rentals.py` (`RentalState`, `check_rentals`, `assess`, `RentalAssessment.state_at`), `collectors/rentals.py`, the `rentals.docker_ps_all` operation (`docker ps -a --format {{.State}}`, pinned local socket; only container states are read, never names, ids, images, environment or logs), `docs/rental-detection.md`, and a 'Rental state' line in `diagnose`. Rules: positive evidence always wins; a source that cannot look (missing, permission denied, timeout, truncated, crash) is unknown; `none` needs every required source (containers, vms) to report none; `none` older than 30 s or dated in the future is downgraded to unknown (an old `active` still blocks); only `none` allows a disruptive action, and confirmation never overrides that. The container source treats ANY container in ANY state as a possible rental, so it can over-block (the host's own containers count) but cannot under-block. The VM source is a stub that always returns unknown, so `none` is impossible with the default sources and every disruptive fix is blocked; tests inject sources to exercise the `none` path. What is needed to finish it is listed in the docs file: real captures of `docker ps -a`, how a VM rental appears, the `kaalia.log` tail under each condition, and any status file or socket the daemon exposes.
 
@@ -383,18 +385,19 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** The safe way to change the system. No fix is wired up yet.
 
 **Scope:**
-- [ ] `fixes/base.py`: a `Fix` with `id`, description, `requires_root`, `requires_no_active_rental`, `dry_run()` returning the exact commands, `apply()`, `undo_notes`.
-- [ ] Fix engine checks, in order: fix is in the whitelist, root is allowed, rental state is `none` if required. Any failure stops the fix and says why.
-- [ ] Dry run is the default. `apply` requires typing the fix id, not just "yes".
-- [ ] Every run writes an action log entry (JSON lines) with time, fix id, commands, result, and undo notes.
-- [ ] Rental state is checked again after confirmation and immediately before the change.
-- [ ] A lock serializes this tool's own runs. It does not stop Vast from assigning workloads, and this step does not claim it does. Disruptive fixes stay advisory on production hosts unless a maintenance state can be verified.
-- [ ] Each fix states its target, expected change, and postconditions. A timeout ends in an observed final state or an explicit `indeterminate` outcome.
-- [ ] After `apply`, the affected collectors re-run and the finding is re-checked.
+- [x] `fixes/base.py`: a `Fix` with `id`, description, `requires_root`, `requires_no_active_rental`, `dry_run()` returning the exact commands, `apply()`, `undo_notes`.
+- [x] Fix engine checks, in order: fix is in the whitelist, root is allowed, rental state is `none` if required. Any failure stops the fix and says why.
+- [x] Dry run is the default. `apply` requires typing the fix id, not just "yes".
+- [x] Every run writes an action log entry (JSON lines) with time, fix id, commands, result, and undo notes.
+- [x] Rental state is checked again after confirmation and immediately before the change.
+- [x] A lock serializes this tool's own runs. It does not stop Vast from assigning workloads, and this step does not claim it does. Disruptive fixes stay advisory on production hosts unless a maintenance state can be verified.
+- [x] Each fix states its target, expected change, and postconditions. A timeout ends in an observed final state or an explicit `indeterminate` outcome.
+- [x] After `apply`, the affected collectors re-run and the finding is re-checked.
 
 **Verify:**
-- [ ] Tests with a test fix that records calls.
-- [ ] Tests: rental state `active` blocks; `unknown` blocks; dry run changes nothing; confirmation mismatch changes nothing.
+- [x] Tests with a test fix that records calls.
+- [x] Tests: rental state `active` blocks; `unknown` blocks; dry run changes nothing; confirmation mismatch changes nothing. Also: the rental appearing or turning unknown after confirmation, the problem disappearing after confirmation, stale `none` evidence, a held lock, a crash releasing the lock, an unwritable log, timeouts judged by observation, and a real subprocess end to end.
+- [ ] Linux-only checks: owner-only (0600) log and lock files, refusal to write through a symlink, and the `flock` lock path. These are POSIX code paths; the one POSIX-only test was skipped on Windows. Needs a Linux run.
 
 **Commit:** `feat(fixes): add fix engine with dry run, confirmation, and action log`
 

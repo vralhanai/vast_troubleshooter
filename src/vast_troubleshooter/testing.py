@@ -1,6 +1,6 @@
 """Test helpers. Collector tests use these instead of the real host."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from vast_troubleshooter.context import HostContext
 from vast_troubleshooter.netaccess import NetworkAccess
@@ -33,6 +33,57 @@ class FakeRunner:
                 op_id=op_id, status=CommandStatus.OK, returncode=0, stdout=recorded
             )
         return recorded
+
+
+class FakeMutationRunner:
+    """Stands in for the mutation runner. Records every call; changes nothing.
+
+    `argv` maps an op id to the command it would run. `results` scripts what
+    running it returns (default: success). `needs_root` ops report "needs root"
+    at planning time. `on_run` lets a test change a pretend host when a command
+    "runs", so the fix engine can observe the change.
+    """
+
+    def __init__(
+        self,
+        argv: Mapping[str, list[str]],
+        results: Mapping[str, CommandResult] | None = None,
+        needs_root: frozenset[str] = frozenset(),
+        on_run: Callable[[str], None] | None = None,
+    ) -> None:
+        self._argv = dict(argv)
+        self._results = dict(results or {})
+        self._needs_root = needs_root
+        self._on_run = on_run
+        self.plan_calls: list[str] = []
+        self.run_calls: list[str] = []
+
+    def plan(
+        self, op_id: str, **operands: str
+    ) -> tuple[list[str], CommandResult | None]:
+        self.plan_calls.append(op_id)
+        if op_id not in self._argv:
+            return [], CommandResult(
+                op_id, CommandStatus.REFUSED, detail="operation is not allowlisted"
+            )
+        if op_id in self._needs_root:
+            return [], CommandResult(
+                op_id,
+                CommandStatus.NEEDS_ROOT,
+                detail="needs root; elevated reads are not enabled",
+            )
+        return list(self._argv[op_id]), None
+
+    def run(self, op_id: str, **operands: str) -> CommandResult:
+        self.run_calls.append(op_id)
+        if self._on_run is not None:
+            self._on_run(op_id)
+        return self._results.get(
+            op_id,
+            CommandResult(
+                op_id, CommandStatus.OK, argv=tuple(self._argv[op_id]), returncode=0
+            ),
+        )
 
 
 class FakeFiles:
