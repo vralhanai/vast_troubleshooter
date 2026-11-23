@@ -19,6 +19,7 @@ from vast_troubleshooter.diagnose import (
     elevated_commands,
     run_diagnosis,
 )
+from vast_troubleshooter.fixes import FIXES, FixOutcome, FixStatus, default_fix_engine
 from vast_troubleshooter.models import Fact, Severity
 from vast_troubleshooter.rule_engine import RuleFileError, load_default_rules
 
@@ -229,3 +230,110 @@ def diagnose(
     else:
         render_human(diagnosis, Console())
     raise typer.Exit(diagnosis.exit_code)
+
+
+# Exit codes for `fix`: 0 dry run or success, 1 blocked, 2 tool error,
+# 4 the fix ran and failed, 5 it ran and the result cannot be told.
+_FIX_EXIT = {
+    FixStatus.DRY_RUN: 0,
+    FixStatus.SUCCEEDED: 0,
+    FixStatus.BLOCKED: 1,
+    FixStatus.FAILED: 4,
+    FixStatus.INDETERMINATE: 5,
+}
+
+
+def render_fix(outcome: FixOutcome, console: Console) -> None:
+    def out(text: str = "") -> None:
+        console.print(text, soft_wrap=True, highlight=False)
+
+    def clean(text: str) -> str:
+        return escape(safe_text(text))
+
+    colour = {
+        FixStatus.SUCCEEDED: "green",
+        FixStatus.DRY_RUN: "cyan",
+        FixStatus.BLOCKED: "yellow",
+        FixStatus.FAILED: "bold red",
+        FixStatus.INDETERMINATE: "bold yellow",
+    }[outcome.status]
+    out(f"[{colour}]{outcome.status.value.upper()}[/{colour}] {clean(outcome.fix_id)}")
+    for reason in outcome.reasons:
+        out(f"  {clean(reason)}")
+    if outcome.target:
+        out(f"  target: {clean(outcome.target)}")
+        out(f"  expected change: {clean(outcome.expected_change)}")
+    for warning in outcome.warnings:
+        out(f"  [yellow]warning:[/yellow] {clean(warning)}")
+    if outcome.status is FixStatus.DRY_RUN:
+        out("  would run (nothing has been changed):")
+        for command in outcome.commands:
+            out(f"    {clean(' '.join(command))}")
+    if outcome.rental_state:
+        out(f"  rental state: {clean(outcome.rental_state)}")
+    if outcome.before or outcome.after:
+        out(f"  check before: {outcome.before or '-'}, after: {outcome.after or '-'}")
+    if outcome.rolled_back:
+        out("  the change was rolled back")
+    if outcome.undo_notes and outcome.status is not FixStatus.BLOCKED:
+        out(f"  how to undo: {clean(outcome.undo_notes)}")
+
+
+@app.command()
+def fix(
+    fix_id: str = typer.Argument(
+        None, help="The fix to run. Leave out to list the fixes."
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Make the change. Without this, only show what would happen.",
+    ),
+    use_sudo: bool = typer.Option(
+        False,
+        "--use-sudo",
+        help="Let the fixed commands that need root run through 'sudo -n'.",
+    ),
+    demo_disposable_host: bool = typer.Option(
+        False,
+        "--demo-disposable-host",
+        help="Allow a demo-only fix. Only on a disposable test machine, never a live host.",
+    ),
+) -> None:
+    """Show, or apply, a fix. A dry run is the default and changes nothing."""
+    console = Console()
+    if fix_id is None:
+        for known in FIXES.values():
+            tag = " (demo only)" if known.demo_only else ""
+            typer.echo(safe_text(f"{known.id}{tag}: {known.description}"))
+        raise typer.Exit(0)
+
+    ctx = default_context(allow_elevated=use_sudo)
+    try:
+        engine = default_fix_engine(ctx, use_sudo=use_sudo)
+        outcome = engine.run(fix_id, allow_demo=demo_disposable_host)
+        render_fix(outcome, console)
+        if outcome.status is FixStatus.DRY_RUN and apply:
+            console.print()
+            try:
+                typed = typer.prompt(
+                    f"Type the fix id ({fix_id}) to confirm, or anything else to cancel",
+                    default="",
+                    show_default=False,
+                )
+            except typer.Abort:
+                typed = ""
+            if typed != fix_id:
+                typer.echo("Not confirmed. Nothing was changed.")
+                raise typer.Exit(1)
+            outcome = engine.run(
+                fix_id, apply=True, confirmation=typed, allow_demo=demo_disposable_host
+            )
+            console.print()
+            render_fix(outcome, console)
+        elif outcome.status is FixStatus.DRY_RUN:
+            typer.echo("Dry run only. Add --apply to make the change.")
+    except (RuleFileError, ValueError) as exc:
+        typer.echo(f"error: {safe_text(str(exc))}", err=True)
+        raise typer.Exit(EXIT_TOOL_ERROR) from exc
+    raise typer.Exit(_FIX_EXIT[outcome.status])

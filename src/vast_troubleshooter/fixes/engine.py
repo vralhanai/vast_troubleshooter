@@ -3,21 +3,25 @@
 Order of checks, each of which stops the run and says why, with nothing changed:
 
   1. the fix is on the whitelist
-  2. root is available if the fix needs it
-  3. no rental is active (rental state is `none`), if the fix needs that
-  4. the problem the fix resolves is actually present
+  2. demo-only fixes are refused unless the operator said this is a test machine
+  3. the fix's target can be worked out, and root is available if it needs it
+  4. no rental is active (rental state is `none`), if the fix needs that
+  5. the fix's own preconditions hold, and the problem it resolves is present
   -- dry run stops here (the default) --
-  5. the operator typed the fix id exactly
-  6. this tool's own lock is free
-  7. the action log is writable (no unlogged change, ever)
-  8. rental state and the problem are checked AGAIN, immediately before the change
+  6. the operator typed the fix id exactly
+  7. this tool's own lock is free
+  8. the action log is writable (no unlogged change, ever)
+  9. rental state, preconditions, and the problem are checked AGAIN, immediately
+     before the change
 
-Then each command runs in order, the affected collectors run again, and the
-rule the fix resolves must now pass. A timeout is judged by what is observed
-afterwards, or reported as indeterminate. Rollback does not exist for a daemon
-restart: an interrupted workload cannot be restored.
+Then each command runs in order, the engine waits for the fix's settle time, the
+affected collectors run again, and the rule the fix resolves must now pass. A
+timeout is judged by what is observed afterwards. If the result is not a
+success and the fix has a rollback, the rollback runs. Rolling back a daemon
+restart does not exist: an interrupted workload cannot be restored.
 """
 
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -25,7 +29,13 @@ from pathlib import Path
 
 from vast_troubleshooter.collectors import get_collectors, run_collectors
 from vast_troubleshooter.context import HostContext
-from vast_troubleshooter.fixes.base import Fix, FixOutcome, FixStatus, PlanningRunner
+from vast_troubleshooter.fixes.base import (
+    Fix,
+    FixOutcome,
+    FixStatus,
+    FixStep,
+    PlanningRunner,
+)
 from vast_troubleshooter.fixes.storage import (
     ActionLog,
     LockBusyError,
@@ -34,7 +44,7 @@ from vast_troubleshooter.fixes.storage import (
 )
 from vast_troubleshooter.models import CheckStatus, Fact
 from vast_troubleshooter.rentals import RentalAssessment, RentalState, check_rentals
-from vast_troubleshooter.rule_engine import Rule, evaluate_rules
+from vast_troubleshooter.rule_engine import Rule, evaluate_rules, facts_by_key
 from vast_troubleshooter.runner import CommandStatus
 
 RentalCheck = Callable[[HostContext], RentalAssessment]
@@ -58,6 +68,7 @@ class FixEngine:
         rental_check: RentalCheck = check_rentals,
         observe: Observe | None = None,
         clock: Callable[[], datetime] = _utcnow,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._fixes = dict(fixes)
         self._runner = mutation_runner
@@ -72,18 +83,22 @@ class FixEngine:
         self._rental_check = rental_check
         self._observe = observe or self._observe_real
         self._clock = clock
+        self._sleep = sleep
 
     # -- observation ----------------------------------------------------------
 
     def _observe_real(self, fix: Fix) -> list[Fact]:
         return run_collectors(get_collectors(fix.affected_collectors), self._ctx)
 
-    def _rule_status(self, fix: Fix) -> str:
-        if not fix.resolves_rule:
-            return ""
+    def _look(self, fix: Fix) -> tuple[str, str | None]:
+        """(status of the fix's rule, reason a precondition fails or None)."""
         facts = self._observe(fix)
-        (result,) = evaluate_rules([self._rules[fix.resolves_rule]], facts)
-        return result.status.value
+        status = ""
+        if fix.resolves_rule:
+            (result,) = evaluate_rules([self._rules[fix.resolves_rule]], facts)
+            status = result.status.value
+        reason = fix.precheck(facts_by_key(facts)) if fix.precheck else None
+        return status, reason
 
     def _rental(self) -> tuple[RentalState, str]:
         assessment = self._rental_check(self._ctx)
@@ -92,26 +107,44 @@ class FixEngine:
     # -- the run ----------------------------------------------------------------
 
     def run(
-        self, fix_id: str, *, apply: bool = False, confirmation: str | None = None
+        self,
+        fix_id: str,
+        *,
+        apply: bool = False,
+        confirmation: str | None = None,
+        allow_demo: bool = False,
     ) -> FixOutcome:
         run_id = uuid.uuid4().hex[:12]
         fix = self._fixes.get(fix_id)
         if fix is None:
             return self._blocked(run_id, None, fix_id, "unknown_fix", "not a known fix")
+        if fix.demo_only and not allow_demo:
+            return self._blocked(
+                run_id,
+                fix,
+                fix_id,
+                "demo_only",
+                "this fix is only for a disposable test machine; "
+                "it is not offered on a live host",
+            )
 
-        plans: list[list[str]] = []
-        for op_id in fix.commands:
-            argv, early = self._runner.plan(op_id)
-            if early is not None:
-                code = (
-                    "needs_root"
-                    if early.status is CommandStatus.NEEDS_ROOT
-                    else "not_allowed"
-                )
+        operands: Mapping[str, str] = {}
+        if fix.operand_source is not None:
+            found = fix.operand_source(self._ctx)
+            if not found:
                 return self._blocked(
-                    run_id, fix, fix_id, code, early.detail or early.status.value
+                    run_id,
+                    fix,
+                    fix_id,
+                    "operands_unavailable",
+                    "could not tell what this fix should act on "
+                    "(for example which network link); change it by hand",
                 )
-            plans.append(argv)
+            operands = found
+
+        plans = self._plan(fix, fix.commands, operands)
+        if isinstance(plans, tuple):  # (code, reason)
+            return self._blocked(run_id, fix, fix_id, *plans)
 
         rental = ""
         if fix.requires_no_active_rental:
@@ -130,7 +163,11 @@ class FixEngine:
                     rental,
                 )
 
-        before = self._rule_status(fix)
+        before, problem = self._look(fix)
+        if problem:
+            return self._blocked(
+                run_id, fix, fix_id, "precondition_failed", problem, rental, before
+            )
         if fix.resolves_rule and before != CheckStatus.FAIL.value:
             reason = {
                 "pass": "nothing to fix: the check already passes",
@@ -184,12 +221,40 @@ class FixEngine:
                 before,
             )
         try:
-            return self._apply(run_id, fix, commands, before)
+            return self._apply(run_id, fix, commands, operands, before)
         finally:
             lock.release()
 
+    def _plan(
+        self, fix: Fix, steps: Sequence[FixStep], operands: Mapping[str, str]
+    ) -> list[list[str]] | tuple[str, str]:
+        plans: list[list[str]] = []
+        for step in steps:
+            try:
+                given = {name: operands[name] for name in step.operands}
+            except KeyError:
+                return (
+                    "operands_unavailable",
+                    f"{step.op_id} needs an operand that was not found",
+                )
+            argv, early = self._runner.plan(step.op_id, **given)
+            if early is not None:
+                code = (
+                    "needs_root"
+                    if early.status is CommandStatus.NEEDS_ROOT
+                    else "not_allowed"
+                )
+                return code, early.detail or early.status.value
+            plans.append(argv)
+        return plans
+
     def _apply(
-        self, run_id: str, fix: Fix, commands: tuple[tuple[str, ...], ...], before: str
+        self,
+        run_id: str,
+        fix: Fix,
+        commands: tuple[tuple[str, ...], ...],
+        operands: Mapping[str, str],
+        before: str,
     ) -> FixOutcome:
         # Nothing may change unless it can be logged first.
         try:
@@ -215,7 +280,7 @@ class FixEngine:
 
         # Re-check immediately before the change: confirmation takes time, and
         # the host can change while the operator is typing.
-        state, why = ("", "")
+        state = ""
         if fix.requires_no_active_rental:
             now_state, why = self._rental()
             state = now_state.value
@@ -229,7 +294,17 @@ class FixEngine:
                     state,
                     before,
                 )
-        again = self._rule_status(fix)
+        again, problem = self._look(fix)
+        if problem:
+            return self._blocked(
+                run_id,
+                fix,
+                fix.id,
+                "state_changed",
+                f"a precondition no longer holds: {problem}",
+                state,
+                before,
+            )
         if fix.resolves_rule and again != CheckStatus.FAIL.value:
             return self._blocked(
                 run_id,
@@ -241,30 +316,21 @@ class FixEngine:
                 before,
             )
 
-        timed_out = False
-        failed = ""
-        for op_id in fix.commands:
-            result = self._runner.run(op_id)
-            self._log.write(
-                {
-                    "run_id": run_id,
-                    "fix_id": fix.id,
-                    "phase": "command",
-                    "op_id": op_id,
-                    "status": result.status.value,
-                    "returncode": result.returncode,
-                }
-            )
-            if result.status is CommandStatus.TIMEOUT:
-                timed_out = True
-                failed = f"{op_id} timed out"
-                break
-            if not result.ok:
-                failed = f"{op_id} failed ({result.status.value})"
-                break
-
-        after = self._rule_status(fix)
+        failed, timed_out = self._run_steps(
+            run_id, fix, fix.commands, operands, "command"
+        )
+        if fix.settle_seconds:
+            self._sleep(fix.settle_seconds)
+        after, _ = self._look(fix)
         status, reasons = self._judge(fix, failed, timed_out, after)
+
+        rolled_back = False
+        if status is not FixStatus.SUCCEEDED and fix.rollback:
+            self._run_steps(run_id, fix, fix.rollback, operands, "rollback")
+            rolled_back = True
+            reasons = (*reasons, "rolled back")
+            after, _ = self._look(fix)
+
         outcome = self._outcome(
             status,
             run_id,
@@ -274,6 +340,7 @@ class FixEngine:
             rental=state,
             before=before,
             after=after,
+            rolled_back=rolled_back,
         )
         self._log.write(
             {
@@ -284,10 +351,39 @@ class FixEngine:
                 "reasons": list(reasons),
                 "before": before,
                 "after": after,
+                "rolled_back": rolled_back,
                 "undo_notes": fix.undo_notes,
             }
         )
         return outcome
+
+    def _run_steps(
+        self,
+        run_id: str,
+        fix: Fix,
+        steps: Sequence[FixStep],
+        operands: Mapping[str, str],
+        phase: str,
+    ) -> tuple[str, bool]:
+        """Run steps in order; stop at the first failure. Returns (failure, timed_out)."""
+        for step in steps:
+            given = {name: operands[name] for name in step.operands}
+            result = self._runner.run(step.op_id, **given)
+            self._log.write(
+                {
+                    "run_id": run_id,
+                    "fix_id": fix.id,
+                    "phase": phase,
+                    "op_id": step.op_id,
+                    "status": result.status.value,
+                    "returncode": result.returncode,
+                }
+            )
+            if result.status is CommandStatus.TIMEOUT:
+                return f"{step.op_id} timed out", True
+            if not result.ok:
+                return f"{step.op_id} failed ({result.status.value})", False
+        return "", False
 
     @staticmethod
     def _judge(
@@ -301,22 +397,23 @@ class FixEngine:
                 "commands ran; this fix has no check to confirm the result",
             )
         if after == CheckStatus.PASS.value:
-            note = (
-                (f"{failed}, but the check now passes",)
-                if failed
-                else ("the check now passes",)
-            )
             if failed and not timed_out:
                 return FixStatus.FAILED, (
                     f"{failed}; the check passes, but the command did not report success",
                 )
-            return FixStatus.SUCCEEDED, note
-        if after == CheckStatus.FAIL.value:
-            return FixStatus.FAILED, (
-                (failed + "; " if failed else "") + "the problem is still present",
+            note = (
+                f"{failed}, but the check now passes"
+                if failed
+                else "the check now passes"
             )
-        reason = f"the check is {after or 'unknown'} afterwards, so the result cannot be told"
-        return FixStatus.INDETERMINATE, ((failed + "; " if failed else "") + reason,)
+            return FixStatus.SUCCEEDED, (note,)
+        prefix = failed + "; " if failed else ""
+        if after == CheckStatus.FAIL.value:
+            return FixStatus.FAILED, (prefix + "the problem is still present",)
+        return FixStatus.INDETERMINATE, (
+            prefix
+            + f"the check is {after or 'unknown'} afterwards, so the result cannot be told",
+        )
 
     # -- helpers ----------------------------------------------------------------
 
@@ -332,6 +429,7 @@ class FixEngine:
         before: str = "",
         after: str = "",
         block_code: str = "",
+        rolled_back: bool = False,
     ) -> FixOutcome:
         return FixOutcome(
             status=status,
@@ -342,10 +440,12 @@ class FixEngine:
             target=fix.target,
             expected_change=fix.expected_change,
             undo_notes=fix.undo_notes,
+            warnings=fix.warnings,
             rental_state=rental,
             before=before,
             after=after,
             block_code=block_code,
+            rolled_back=rolled_back,
         )
 
     def _blocked(
@@ -366,6 +466,7 @@ class FixEngine:
             target=fix.target if fix else "",
             expected_change=fix.expected_change if fix else "",
             undo_notes=fix.undo_notes if fix else "",
+            warnings=fix.warnings if fix else (),
             rental_state=rental,
             before=before,
             block_code=code,

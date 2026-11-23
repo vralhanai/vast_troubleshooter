@@ -614,9 +614,8 @@ def test_the_engine_rejects_a_fix_that_names_an_unknown_rule(tmp_path: Path) -> 
 # -- the mutation allowlist is separate and empty ----------------------------------------------------
 
 
-def test_no_fix_is_wired_up_yet_and_the_registries_are_separate() -> None:
-    assert dict(FIXES) == {}
-    assert dict(MUTATION_OPERATIONS) == {}
+def test_the_read_and_mutation_registries_are_separate() -> None:
+    assert set(FIXES) == {"restart-vast-daemon", "fix-dns-resolver"}
     assert not set(MUTATION_OPERATIONS) & set(READ_OPERATIONS)
 
 

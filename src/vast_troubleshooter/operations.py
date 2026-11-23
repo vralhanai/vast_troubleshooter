@@ -140,6 +140,15 @@ _OPERATIONS = (
         docker=True,
         timeout=20,
     ),
+    # DNS repair needs to know who owns the resolver and which link to act on.
+    Operation(
+        id="network.resolved_active",
+        executable="systemctl",
+        args=("is-active", "systemd-resolved"),
+    ),
+    Operation(
+        id="dns.default_route", executable="ip", args=("-o", "route", "show", "default")
+    ),
     # `docker=True`: the runner pins the trusted local socket and refuses
     # environments that point at another daemon.
     Operation(

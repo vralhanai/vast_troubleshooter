@@ -57,6 +57,7 @@ class FakeMutationRunner:
         self._on_run = on_run
         self.plan_calls: list[str] = []
         self.run_calls: list[str] = []
+        self.run_operands: list[dict[str, str]] = []
 
     def plan(
         self, op_id: str, **operands: str
@@ -76,6 +77,7 @@ class FakeMutationRunner:
 
     def run(self, op_id: str, **operands: str) -> CommandResult:
         self.run_calls.append(op_id)
+        self.run_operands.append(dict(operands))
         if self._on_run is not None:
             self._on_run(op_id)
         return self._results.get(

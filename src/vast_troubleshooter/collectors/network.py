@@ -76,7 +76,12 @@ class NetworkCollector(Collector):
         return lines
 
     def collect(self, ctx: HostContext) -> list[Fact]:
-        return [*self._dns(ctx), *self._nameservers(ctx), *self._outbound(ctx)]
+        return [
+            *self._dns(ctx),
+            *self._nameservers(ctx),
+            self._resolved(ctx),
+            *self._outbound(ctx),
+        ]
 
     # -- DNS ------------------------------------------------------------------
 
@@ -157,6 +162,20 @@ class NetworkCollector(Collector):
                 source_command=source,
             ),
         ]
+
+    # -- who owns the resolver --------------------------------------------------
+
+    def _resolved(self, ctx: HostContext) -> Fact:
+        """Is systemd-resolved running? `is-active` prints the state and exits
+        non-zero when it is not active, so the output is read either way."""
+        key = "network.resolved_active"
+        result = ctx.runner.run("network.resolved_active")
+        word = result.stdout.strip().lower()
+        if result.ok and word == "active":
+            return self.fact(key, True, source_command=result.source_command)
+        if word in {"inactive", "failed", "activating", "deactivating", "unknown"}:
+            return self.fact(key, False, source_command=result.source_command)
+        return self.failed_from_result(key, result)
 
     # -- opt-in outbound probes -----------------------------------------------
 
