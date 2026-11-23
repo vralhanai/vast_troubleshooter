@@ -8,7 +8,10 @@ This is the step-by-step plan to build the POC described in [PLAN.md](PLAN.md). 
 |---|---|---|---|
 | 0 | Design baseline | Done | `c068d49`, `514a93a` |
 | 1 | Project tooling and CLI skeleton | Done | see git log |
-| 2 to 19 | Not started | Waiting | |
+| 2 | Core data models | Done | see git log |
+| 3 to 19 | Not started | Waiting | |
+
+Step 2 verification (2026-11-23): `uv run pytest` 19 passed; ruff check and format clean. Added pydantic 2.14.4. Models: `Fact`, `ShareableFact` (allowlisted view with no source command or raw excerpt; string values capped at 200 chars, no control characters), `Finding`, and enums `FactStatus`, `CheckStatus`, `Severity`, `Category`. All models forbid unknown fields and are frozen.
 
 Step 1 verification (run 2026-11-23): `uv run pytest` 2 passed; `ruff check` and `ruff format --check` clean; `vast-troubleshooter --help` and `version` (prints `0.1.0`) work. Python 3.15.2 was available to `uv`, so the pin stays. Installed: typer 0.29.2, pytest 9.2.0, ruff 0.17.6.
 

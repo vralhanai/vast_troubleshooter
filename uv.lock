@@ -247,6 +247,7 @@ name = "vast-troubleshooter"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "pydantic" },
     { name = "typer" },
 ]
 
@@ -257,7 +258,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "typer", specifier = ">=0.29.2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.14.4" },
+    { name = "typer", specifier = ">=0.29.2" },
+]
 
 [package.metadata.requires-dev]
 dev = [
