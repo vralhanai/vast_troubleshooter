@@ -1,0 +1,1 @@
+{"ClientInfo":{"Version":"27.3.1"},"ServerErrors":["permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: connect: permission denied"]}

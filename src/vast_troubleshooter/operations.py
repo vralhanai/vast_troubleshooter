@@ -44,6 +44,15 @@ _OPERATIONS = (
         timeout=20,
     ),
     Operation(id="gpu.lspci_nvidia", executable="lspci", args=("-d", "10de:", "-nn")),
+    # `docker=True`: the runner pins the trusted local socket and refuses
+    # environments that point at another daemon.
+    Operation(
+        id="docker.info",
+        executable="docker",
+        args=("info", "--format", "{{json .}}"),
+        docker=True,
+        timeout=20,
+    ),
     # Plain nvidia-smi: the header line carries the CUDA version.
     Operation(id="driver.smi_summary", executable="nvidia-smi", timeout=20),
 )

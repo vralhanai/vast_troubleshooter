@@ -14,3 +14,15 @@ Real captures must be sanitized (no hostnames, IPs, serial numbers).
 7 in `nvidia-smi`). Written from the documented formats, **unverified against
 real output**. Open question: which throttle-reason field name each driver
 accepts (`clocks_event_reasons` vs `clocks_throttle_reasons`).
+
+## docker/
+
+`docker info --format '{{json .}}'` output for the `docker` collector, trimmed to
+the fields the collector reads: `running_nvidia`, `running_no_nvidia`,
+`daemon_down`, `permission_denied`, `daemon_down_observed`. The first four are
+written from the documented format, **unverified against real output**.
+`daemon_down_observed` is the shape actually seen on 2026-11-23 with Docker 29.9.3
+(Windows client, pinned to a Unix socket that does not exist): exit code 1,
+JSON on stdout with empty fields and `ServerErrors: null`, and the message
+"Cannot connect to the Docker daemon ... Is the docker daemon running?" on
+stderr only. So `ServerErrors` cannot be relied on; the collector also reads stderr.

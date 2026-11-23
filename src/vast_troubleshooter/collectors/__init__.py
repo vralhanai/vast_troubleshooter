@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 
 from vast_troubleshooter.collectors.base import Collector, run_collectors
+from vast_troubleshooter.collectors.docker import DockerCollector
 from vast_troubleshooter.collectors.driver import DriverCollector
 from vast_troubleshooter.collectors.gpu import GpuCollector
 from vast_troubleshooter.collectors.system import SystemCollector
@@ -16,7 +17,8 @@ __all__ = [
 ]
 
 COLLECTORS: dict[str, Collector] = {
-    c.name: c for c in (SystemCollector(), GpuCollector(), DriverCollector())
+    c.name: c
+    for c in (SystemCollector(), GpuCollector(), DriverCollector(), DockerCollector())
 }
 
 

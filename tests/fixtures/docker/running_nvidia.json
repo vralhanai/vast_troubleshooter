@@ -1,0 +1,1 @@
+{"Containers":0,"ServerVersion":"27.3.1","DefaultRuntime":"runc","Runtimes":{"io.containerd.runc.v2":{"path":"runc"},"nvidia":{"path":"nvidia-container-runtime"},"runc":{"path":"runc"}},"DockerRootDir":"/var/lib/docker","OperatingSystem":"Ubuntu 24.04.1 LTS","ServerErrors":null}

@@ -12,7 +12,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 3:** Command runner with allowlist (Linux test run still open, see Step 3 verify)
 - [x] **Step 4:** Collector framework and `system` collector (Linux run still open)
 - [x] **Step 5:** `gpu` and `driver` collectors (real-host fixtures still open)
-- [ ] **Step 6:** `docker` collector
+- [x] **Step 6:** `docker` collector (Linux capture still open)
 - [ ] **Step 7:** `kernel_log` collector
 - [ ] **Step 8:** `network` collector
 - [ ] **Step 9:** `vast_host` collector
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 6 verification (2026-11-23): `uv run pytest` 136 passed; ruff check and format clean. Added `collectors/docker.py` and the `docker.info` operation (runs `docker --host unix:///var/run/docker.sock info --format '{{json .}}'`; the runner pins the endpoint and refuses `DOCKER_HOST`/context overrides, tested against the real operation). Decisions: a daemon that is not running is an observation (`docker.daemon_running = False`, status ok); permission denied on the socket, a refused endpoint, and an unparseable answer are unknown (status error), because the daemon may be fine; a hang is `timeout` for every fact. The NVIDIA check is only whether `nvidia` is in the registered runtimes list; it does not prove a GPU container can start. A real run on this Windows machine (Docker 29.9.3, pinned to a Unix socket that does not exist) showed that `docker info` exits 1 with `ServerErrors: null` and the message on stderr only, so the collector also reads stderr and a fixture records that shape. The Docker-running fixtures are still written from the documented format.
 
 Step 5 verification (2026-11-23): `uv run pytest` 119 passed; ruff check and format clean. Added `collectors/gpu.py`, `collectors/driver.py`, 5 new read operations, and GPU fixtures (healthy 1 and 8 GPUs, failed driver, `ERR!`/`[N/A]`/`[Unknown Error]` columns, 7-of-8 GPUs). Additions beyond the written scope, all small: `FactStatus.UNSUPPORTED` (so `[N/A]` is not confused with an observed empty value); `gpu.pci_count` from `lspci -d 10de: -nn` as the source for the expected GPU count; derived facts `gpu.models_identical` and `gpu.vram_min_mib` and `driver.cuda_version_code` (CUDA's integer encoding, 11.8 = 11080) because the planned rule language has no aggregation or version comparison; and the throttle-reason query is split into two operations with a fallback, because an unknown field name makes the whole `nvidia-smi` query fail. A broken or hung `nvidia-smi` is reported as `driver.nvidia_smi_responding = False` (an observation), not as an unknown. On this Windows machine `collect gpu` and `collect driver` report `missing`, as expected.
 
@@ -195,13 +197,14 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Know whether Docker runs and whether the NVIDIA runtime is set up.
 
 **Scope:**
-- [ ] `docker info` through the trusted local endpoint only (step 3). Refuses `DOCKER_HOST` and contexts pointing elsewhere. Reports daemon up, version, runtimes list, and Docker Root Dir.
-- [ ] Reports whether the NVIDIA runtime appears in the runtimes list.
-- [ ] The GPU test run (`docker run --gpus all ...`) is **not** in this step. It pulls an image and uses the GPU, so it is a later, opt-in check.
-- [ ] Fixtures: daemon running with NVIDIA runtime, daemon running without it, daemon not running.
+- [x] `docker info` through the trusted local endpoint only (step 3). Refuses `DOCKER_HOST` and contexts pointing elsewhere. Reports daemon up, version, runtimes list, and Docker Root Dir.
+- [x] Reports whether the NVIDIA runtime appears in the runtimes list.
+- [x] The GPU test run (`docker run --gpus all ...`) is **not** in this step. It pulls an image and uses the GPU, so it is a later, opt-in check.
+- [x] Fixtures: daemon running with NVIDIA runtime, daemon running without it, daemon not running.
 
 **Verify:**
-- [ ] Tests for each fixture.
+- [x] Tests for each fixture (running with NVIDIA runtime, running without, daemon down, permission denied, plus not installed, hang, refused endpoint, and the daemon-down shape seen on a real Docker client).
+- [ ] Real Linux capture of `docker info` output with and without the NVIDIA runtime. Needs an Ubuntu host (see blockers).
 
 **Commit:** `feat(collectors): add docker collector`
 
