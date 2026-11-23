@@ -1,0 +1,8 @@
+2026-11-23 10:00:01,100 INFO machine 99999 contacting controller at 203.0.113.9
+2026-11-23 10:00:05,200 ERROR failed to reach controller: connection timed out
+2026-11-23 10:00:06,300 WARNING docker daemon not responding for container cust-abc123
+2026-11-23 10:00:07,400 ERROR docker: Cannot connect to the Docker daemon
+2026-11-23 10:00:08,500 ERROR nvidia-smi failed on GPU 0 for instance 424242
+2026-11-23 10:00:09,600 Traceback (most recent call last):
+2026-11-23 10:00:09,700   File "/var/lib/vastai_kaalia/main.py", line 10, in run
+2026-11-23 10:00:10,800 INFO retrying in 30s

@@ -75,6 +75,33 @@ _OPERATIONS = (
         timeout=30,
         max_output=2 * 1024 * 1024,
     ),
+    # The Vast daemon. `show` (not `is-active`) also reports LoadState, which is
+    # the only way to tell a missing unit from a stopped one.
+    Operation(
+        id="vast.service_show",
+        executable="systemctl",
+        args=(
+            "show",
+            "vastai.service",
+            "-p",
+            "LoadState",
+            "-p",
+            "ActiveState",
+            "-p",
+            "SubState",
+            "-p",
+            "NRestarts",
+            "--no-pager",
+        ),
+    ),
+    # The log is root-only on a Vast host, so this is an elevated read: it runs
+    # as root, or with elevated reads enabled, or reports "needs root".
+    Operation(
+        id="vast.daemon_log_tail",
+        executable="tail",
+        args=("-n", "100", "/var/lib/vastai_kaalia/kaalia.log"),
+        needs_root=True,
+    ),
     # `docker=True`: the runner pins the trusted local socket and refuses
     # environments that point at another daemon.
     Operation(

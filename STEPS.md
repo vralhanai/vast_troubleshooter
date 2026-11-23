@@ -15,7 +15,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 6:** `docker` collector (Linux capture still open)
 - [x] **Step 7:** `kernel_log` collector (real-host captures still open)
 - [x] **Step 8:** `network` collector (Linux run still open)
-- [ ] **Step 9:** `vast_host` collector
+- [x] **Step 9:** `vast_host` collector (real-host samples still open)
 - [ ] **Step 10:** `disk` collector
 - [ ] **Step 11:** Rule engine and first rules
 - [ ] **Step 12:** `diagnose` command
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 9 verification (2026-11-23): `uv run pytest` 221 passed; ruff check and format clean. Added `collectors/vast_host.py` and operations `vast.service_show` and `vast.daemon_log_tail`. Two deviations from the written scope, both deliberate: (1) service state uses `systemctl show` with `LoadState` instead of also running `is-active`, because `is-active` reports `inactive` for a unit that does not exist, and the scope asks for a missing unit and a stopped one to be separate facts (`vast_host.unit_loaded` vs `vast_host.service_active`); (2) the log is read through a fixed elevated-read operation (`tail -n 100 /var/lib/vastai_kaalia/kaalia.log`, needs root) instead of a file read, because the Vast docs read it with `sudo`, and that keeps every privileged read behind the step 3 policy. Without root or elevated reads the log facts are `needs_root` while the service facts still come back. A restart loop is `SubState=auto-restart`. **The kaalia.log format is not documented and no real log has been seen**: error detection is generic (whole words error, exception, traceback, critical, fatal) and the network/docker/gpu categories are keyword heuristics, so treat them as hints; only counts and the last error time become facts, and a test proves hostnames, ids, and addresses never do. On this Windows machine `collect vast_host` reports `missing` (no systemctl) and `needs_root`.
 
 Step 8 verification (2026-11-23): `uv run pytest` 189 passed; ruff check and format clean. Added `collectors/network.py`, `netaccess.py` (a `NetworkAccess` interface with a real `LocalNetwork` and a `NoNetwork` default that fails loudly), `FakeNetwork` in `testing.py`, `/etc/resolv.conf` on the file allowlist, and `collect --allow-outbound`. `HostContext` gained `network` and `allow_outbound`; the default context has no network, so a collector that reaches for it by mistake fails visibly instead of silently going online. Decisions: a DNS failure or hang is an observation (`network.dns_vast_ai_resolves = False`, status ok), because the Vast docs list both as failures; resolved addresses are never stored; nameserver addresses live only in `raw_excerpt` (local), and the shareable facts are counts (total, loopback, public), so no address leaves the host in a report; `getaddrinfo` has no timeout so it runs on a daemon thread that is abandoned on timeout; outbound probes are two fixed TCP connects (1.1.1.1:443, 8.8.8.8:53, 3s each) that send no data, and the notice listing them and what they reveal goes to stderr so stdout stays parseable; `network.outbound_probes_enabled` records whether they ran, and probe facts are absent when they did not. Real run on this Windows machine: DNS resolves, both probes connect, resolv.conf is `missing`. Not yet run on Linux.
 
@@ -257,13 +259,14 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Know whether the Vast daemon is running and what its log says.
 
 **Scope:**
-- [ ] `systemctl is-active vastai.service` and `systemctl show vastai.service -p ActiveState,SubState,NRestarts`. Reports restart loops.
-- [ ] Reads the last 100 lines of `/var/lib/vastai_kaalia/kaalia.log` if the file is readable. Facts hold typed evidence only: error category, count, and last matching time. No raw log lines.
-- [ ] Reports missing file and missing service as separate facts.
-- [ ] Fixtures: active, inactive, failed, restart loop, missing unit.
+- [x] `systemctl is-active vastai.service` and `systemctl show vastai.service -p ActiveState,SubState,NRestarts`. Reports restart loops.
+- [x] Reads the last 100 lines of `/var/lib/vastai_kaalia/kaalia.log` if the file is readable. Facts hold typed evidence only: error category, count, and last matching time. No raw log lines.
+- [x] Reports missing file and missing service as separate facts.
+- [x] Fixtures: active, inactive, failed, restart loop, missing unit.
 
 **Verify:**
-- [ ] Tests for each fixture.
+- [x] Tests for each fixture (active, inactive, failed, restart loop, missing unit), plus: no systemd, systemctl missing, hang, unparseable output, missing log file, log needing root, and a test that no log text reaches a fact.
+- [ ] A real `kaalia.log` sample and real `systemctl show vastai.service` output from a Vast host. The log fixtures use an invented format (see below). Needs a host (see blockers).
 
 **Commit:** `feat(collectors): add vast_host collector for vastai.service and daemon log`
 

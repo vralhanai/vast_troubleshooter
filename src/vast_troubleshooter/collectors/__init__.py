@@ -9,6 +9,7 @@ from vast_troubleshooter.collectors.gpu import GpuCollector
 from vast_troubleshooter.collectors.kernel_log import KernelLogCollector
 from vast_troubleshooter.collectors.network import NetworkCollector
 from vast_troubleshooter.collectors.system import SystemCollector
+from vast_troubleshooter.collectors.vast_host import VastHostCollector
 
 __all__ = [
     "COLLECTORS",
@@ -27,6 +28,7 @@ COLLECTORS: dict[str, Collector] = {
         DockerCollector(),
         KernelLogCollector(),
         NetworkCollector(),
+        VastHostCollector(),
     )
 }
 

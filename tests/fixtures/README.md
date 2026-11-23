@@ -46,3 +46,15 @@ matrix, and the exact `NVRM: Xid` wording on newer drivers.
 `resolv_empty.conf`, `resolv_junk.conf` (invalid entries that must be ignored).
 Written from the documented format, **unverified against real files**. All
 addresses are public documentation or well-known resolver addresses.
+
+## vast_host/
+
+`systemctl show vastai.service` output (`show_active`, `show_inactive`,
+`show_failed`, `show_restart_loop`, `show_not_found`), the message a host without
+systemd prints (`no_systemd`), and two daemon logs (`kaalia_clean.log`,
+`kaalia_errors.log`). The `show_*` files are written from the documented
+`systemctl show` format. **The kaalia.log format is invented**: Vast does not
+document it and no real log has been seen, so the log tests only prove the
+generic error-line counting works. The error log fixture contains a made-up
+machine id, container name, instance id, and IP address on purpose, so tests can
+prove none of them reach a fact. Real `kaalia.log` samples are needed.
