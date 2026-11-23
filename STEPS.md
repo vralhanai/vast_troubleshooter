@@ -16,7 +16,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 7:** `kernel_log` collector (real-host captures still open)
 - [x] **Step 8:** `network` collector (Linux run still open)
 - [x] **Step 9:** `vast_host` collector (real-host samples still open)
-- [ ] **Step 10:** `disk` collector
+- [x] **Step 10:** `disk` collector (real-host output still open)
 - [ ] **Step 11:** Rule engine and first rules
 - [ ] **Step 12:** `diagnose` command
 - [ ] **Step 13:** Rental detection
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 10 verification (2026-11-23): `uv run pytest` 256 passed; ruff check and format clean. Added `collectors/disk.py` and operations `disk.df`, `disk.findmnt_root`, `disk.lsblk`, `disk.smart_x`. Deviations from the written scope, each deliberate: (1) space comes from `df -P -B1` through the runner instead of `psutil`, so it is fakeable in tests and needs no new dependency; sizes are reported in bytes (unit `B`) to avoid a GB/GiB ambiguity against Vast's '20 GB' and '200 GB'; (2) SMART uses `smartctl -x` only, because it already prints the overall-health line, so `-H` and `nvme smart-log` would be duplicate calls; (3) added `disk.root_mounted_rw` (`findmnt -no OPTIONS /`), which the step 11 rule 'root not mounted read-write' needs, and aggregate facts (`smart_failed_count`, `nvme_critical_warning_count`, `nvme_media_errors_total`, `sata_reallocated_total`, `sata_pending_total`, `sata_uncorrectable_total`, `hdd_count`) because the planned rule language cannot aggregate; aggregates are absent when no drive's SMART could be read, so unreadable never looks healthy. smartctl's exit code is a bitmask (8 means FAILED), so its output is parsed even when the code is non-zero; a test caught a bug where smartctl's own error text ('Smartctl open device ... failed') was mistaken for SMART data because the check matched the substring 'smart'; it now requires the whole word. The trusted-enumeration check promised in step 3 is done: `smartctl` is only run for names that came from `lsblk`, are on a physical transport (nvme/sata/sas), and match `/dev/(nvme\d+n\d+|sd[a-z]{1,3})`; the Docker dir passed to `df` comes from `docker info` and must be a plain absolute path. No self-test option exists in any operation, and a test enforces that. Serial numbers are never kept. RAID controllers are out of scope. On this Windows machine `collect disk` reports real root space, and `missing` for the rest.
 
 Step 9 verification (2026-11-23): `uv run pytest` 221 passed; ruff check and format clean. Added `collectors/vast_host.py` and operations `vast.service_show` and `vast.daemon_log_tail`. Two deviations from the written scope, both deliberate: (1) service state uses `systemctl show` with `LoadState` instead of also running `is-active`, because `is-active` reports `inactive` for a unit that does not exist, and the scope asks for a missing unit and a stopped one to be separate facts (`vast_host.unit_loaded` vs `vast_host.service_active`); (2) the log is read through a fixed elevated-read operation (`tail -n 100 /var/lib/vastai_kaalia/kaalia.log`, needs root) instead of a file read, because the Vast docs read it with `sudo`, and that keeps every privileged read behind the step 3 policy. Without root or elevated reads the log facts are `needs_root` while the service facts still come back. A restart loop is `SubState=auto-restart`. **The kaalia.log format is not documented and no real log has been seen**: error detection is generic (whole words error, exception, traceback, critical, fatal) and the network/docker/gpu categories are keyword heuristics, so treat them as hints; only counts and the last error time become facts, and a test proves hostnames, ids, and addresses never do. On this Windows machine `collect vast_host` reports `missing` (no systemctl) and `needs_root`.
 
@@ -277,15 +279,16 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Storage facts from the SSD health page, read only.
 
 **Scope:**
-- [ ] Root free space (`psutil`), and Docker Root Dir size and free space.
-- [ ] Drive type and transport from `lsblk -d -o NAME,ROTA,SIZE,MODEL,TRAN`.
-- [ ] SMART overall health from `smartctl -H` (needs root; reported as "needs root" if not run).
-- [ ] NVMe critical warning, spare, and media errors from `nvme smart-log` or `smartctl -x` (needs root).
-- [ ] SATA reallocated, pending, and reported-uncorrect counts from `smartctl -x`.
-- [ ] Does not run self-tests (`smartctl -t`). Those are writes and compete with client I/O.
+- [x] Root free space (`psutil`), and Docker Root Dir size and free space.
+- [x] Drive type and transport from `lsblk -d -o NAME,ROTA,SIZE,MODEL,TRAN`.
+- [x] SMART overall health from `smartctl -H` (needs root; reported as "needs root" if not run).
+- [x] NVMe critical warning, spare, and media errors from `nvme smart-log` or `smartctl -x` (needs root).
+- [x] SATA reallocated, pending, and reported-uncorrect counts from `smartctl -x`.
+- [x] Does not run self-tests (`smartctl -t`). Those are writes and compete with client I/O.
 
 **Verify:**
-- [ ] Tests with fixtures for healthy NVMe, failing NVMe (media errors), healthy SATA, failing SATA (pending sectors), HDD.
+- [x] Tests with fixtures for healthy NVMe, failing NVMe (media errors), healthy SATA, failing SATA (pending sectors), HDD, plus: needs root, smartctl non-zero exit codes, a drive with no SMART, an untrusted Docker path, a bad drive name, and no serial numbers in any fact.
+- [ ] Real `lsblk`, `df`, and `smartctl -x` output from an Ubuntu host with NVMe and SATA drives. Needs a host (see blockers).
 
 **Commit:** `feat(collectors): add disk collector for space, SSD type, and SMART health`
 

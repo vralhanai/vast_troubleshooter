@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 
 from vast_troubleshooter.collectors.base import Collector, run_collectors
+from vast_troubleshooter.collectors.disk import DiskCollector
 from vast_troubleshooter.collectors.docker import DockerCollector
 from vast_troubleshooter.collectors.driver import DriverCollector
 from vast_troubleshooter.collectors.gpu import GpuCollector
@@ -26,6 +27,7 @@ COLLECTORS: dict[str, Collector] = {
         GpuCollector(),
         DriverCollector(),
         DockerCollector(),
+        DiskCollector(),
         KernelLogCollector(),
         NetworkCollector(),
         VastHostCollector(),

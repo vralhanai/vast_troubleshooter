@@ -58,3 +58,14 @@ document it and no real log has been seen, so the log tests only prove the
 generic error-line counting works. The error log fixture contains a made-up
 machine id, container name, instance id, and IP address on purpose, so tests can
 prove none of them reach a fact. Real `kaalia.log` samples are needed.
+
+## disk/
+
+`lsblk -P` output (`lsblk_nvme`, `lsblk_mixed` with NVMe, SATA SSD, HDD, a USB stick
+and a virtual disk, `lsblk_bad_name`), `df -P -B1` output (`df_root`,
+`df_docker_own`, `df_docker_same`), `findmnt` options (`findmnt_rw`, `findmnt_ro`),
+and trimmed `smartctl -x` output (`smart_nvme_healthy`, `smart_nvme_failing`,
+`smart_sata_healthy`, `smart_sata_failing`, `smart_hdd`). Written from the
+documented formats and the Vast SSD health page, **unverified against real
+output**. The smartctl fixtures contain made-up serial numbers on purpose, so
+tests can prove they never reach a fact.

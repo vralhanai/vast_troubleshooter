@@ -4,6 +4,7 @@ Add an operation here only with a collector that needs it. Nothing in this
 registry may change the system.
 """
 
+import re
 from collections.abc import Mapping
 
 from vast_troubleshooter.runner import Operation
@@ -101,6 +102,33 @@ _OPERATIONS = (
         executable="tail",
         args=("-n", "100", "/var/lib/vastai_kaalia/kaalia.log"),
         needs_root=True,
+    ),
+    # Storage. Block-device operands must match a physical-drive pattern, and the
+    # collector only passes names it got from lsblk.
+    Operation(
+        id="disk.df",
+        executable="df",
+        args=("-P", "-B1", "{path}"),
+        operands={"path": re.compile(r"/[A-Za-z0-9_./+-]*")},
+    ),
+    Operation(
+        id="disk.findmnt_root", executable="findmnt", args=("-no", "OPTIONS", "/")
+    ),
+    # -e 7 drops loop devices (the SSD health page warns about them).
+    Operation(
+        id="disk.lsblk",
+        executable="lsblk",
+        args=("-d", "-b", "-P", "-e", "7", "-o", "NAME,ROTA,SIZE,MODEL,TRAN"),
+    ),
+    # smartctl -x includes the overall-health line. No self-test option (-t) is
+    # ever allowed: self-tests write and compete with client I/O.
+    Operation(
+        id="disk.smart_x",
+        executable="smartctl",
+        args=("-x", "{device}"),
+        operands={"device": re.compile(r"/dev/(nvme\d+n\d+|sd[a-z]{1,3})")},
+        needs_root=True,
+        timeout=30,
     ),
     # `docker=True`: the runner pins the trusted local socket and refuses
     # environments that point at another daemon.

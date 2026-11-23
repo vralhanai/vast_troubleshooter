@@ -16,7 +16,12 @@ class FakeRunner:
 
     def run(self, op_id: str, **operands: str) -> CommandResult:
         self.calls.append((op_id, dict(operands)))
-        recorded = self._results.get(op_id)
+        # An operation with operands can be keyed per call, e.g.
+        # "disk.smart_x[device=/dev/sda]"; the plain op id is the fallback.
+        suffix = ",".join(f"{k}={v}" for k, v in sorted(operands.items()))
+        recorded = self._results.get(f"{op_id}[{suffix}]") if suffix else None
+        if recorded is None:
+            recorded = self._results.get(op_id)
         if recorded is None:
             return CommandResult(
                 op_id=op_id,

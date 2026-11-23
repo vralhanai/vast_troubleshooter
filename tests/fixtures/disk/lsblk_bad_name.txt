@@ -1,0 +1,1 @@
+NAME="sda;reboot" ROTA="0" SIZE="1" MODEL="x" TRAN="sata"
