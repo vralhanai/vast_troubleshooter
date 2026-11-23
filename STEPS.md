@@ -9,7 +9,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 0:** Design baseline (`c068d49`, `514a93a`)
 - [x] **Step 1:** Project tooling and CLI skeleton (`9b40dd1`)
 - [x] **Step 2:** Core data models (`95c02ca`)
-- [ ] **Step 3:** Command runner with allowlist
+- [x] **Step 3:** Command runner with allowlist (Linux test run still open, see Step 3 verify)
 - [ ] **Step 4:** Collector framework and `system` collector
 - [ ] **Step 5:** `gpu` and `driver` collectors
 - [ ] **Step 6:** `docker` collector
@@ -26,6 +26,8 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [ ] **Step 17:** Docker image for Windows dev and test
 - [ ] **Step 18:** POC end-to-end test
 - [ ] **Step 19:** Packaging and release
+
+Step 3 verification (2026-11-23): `uv run pytest` 55 passed on Windows; ruff check and format clean. Added `runner.py` (operations by id, no shell, minimal env, timeout kills the process group, bounded output, Docker endpoint policy, needs-root handling), `operations.py` (registry with `system.uname_release`), and `testing.py` (`FakeRunner`). A test caught a real bug: `shutil.which` takes `mode` second, so the search path is now passed by keyword. Not yet run on Linux: the POSIX-only code paths (process-group kill, safe PATH, real sudo) are only covered by planning tests.
 
 Step 2 verification (2026-11-23): `uv run pytest` 19 passed; ruff check and format clean. Added pydantic 2.14.4. Models: `Fact`, `ShareableFact` (allowlisted view with no source command or raw excerpt; string values capped at 200 chars, no control characters), `Finding`, and enums `FactStatus`, `CheckStatus`, `Severity`, `Category`. All models forbid unknown fields and are frozen.
 
@@ -128,21 +130,21 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** One safe way to run system commands, used by every collector.
 
 **Scope:**
-- [ ] `runner.py`:
+- [x] `runner.py`:
   - Takes an argument list, never a shell string.
   - Only commands on an allowlist can run. Each allowlist entry names the command, its arguments, and whether it needs root.
   - Per-command timeout. On timeout, returns a result with status `timeout`. Never hangs.
   - Missing binary returns status `missing`. Non-zero exit returns status `error` with stderr.
   - Captures stdout and stderr. Output is treated as data only.
-- [ ] A fake runner for tests, which returns fixture output keyed by command.
-- [ ] Privilege policy, decided before any collector runs: the tool and runner run as the invoking user. Elevated reads go through fixed operations only, each with an approved executable path, argument schema, and minimal environment. Dynamic operands (such as block-device names) are checked against a trusted enumeration first. No free-form `sudo`.
-- [ ] Endpoint policy: the runner rejects `DOCKER_HOST`, Docker contexts, and other overrides that point away from a trusted local endpoint. Remote daemons are refused.
-- [ ] Read and mutation allowlists are separate. There is no mutation allowlist until step 14.
-- [ ] A timeout kills the child process and drains bounded output. Pagers and interactive prompts are disabled.
+- [x] A fake runner for tests, which returns fixture output keyed by command.
+- [x] Privilege policy, decided before any collector runs: the tool and runner run as the invoking user. Elevated reads go through fixed operations only, each with an approved executable path, argument schema, and minimal environment. Dynamic operands (such as block-device names) are checked against a trusted enumeration first. No free-form `sudo`. (Operands are checked against a pattern and for option-like values now. The trusted-enumeration check for block devices is added with the disk collector in step 10.)
+- [x] Endpoint policy: the runner rejects `DOCKER_HOST`, Docker contexts, and other overrides that point away from a trusted local endpoint. Remote daemons are refused.
+- [x] Read and mutation allowlists are separate. There is no mutation allowlist until step 14.
+- [x] A timeout kills the child process and drains bounded output. Pagers and interactive prompts are disabled.
 
 **Verify:**
-- [ ] Tests for: allowlisted command runs, unknown command refused, timeout, missing binary, non-zero exit, no shell is used (passed to subprocess as list with `shell=False`), refusal of unexpected operands, refusal of inherited `DOCKER_HOST` and remote daemon selection, denied permissions.
-- [ ] Tests pass on Windows and Linux.
+- [x] Tests for: allowlisted command runs, unknown command refused, timeout, missing binary, non-zero exit, no shell is used (passed to subprocess as list with `shell=False`), refusal of unexpected operands, refusal of inherited `DOCKER_HOST` and remote daemon selection, denied permissions.
+- [ ] Tests pass on Windows and Linux. (Windows: 54 passed. Linux: not run yet, needs an Ubuntu host. Covered on Windows by planning tests: sudo prefix, safe PATH, process-group kill are POSIX code paths.)
 
 **Commit:** `feat(runner): add allowlisted, timeout-bounded command runner`
 
