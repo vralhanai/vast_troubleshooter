@@ -1,6 +1,6 @@
 # Vast Troubleshooter: Plan
 
-This plan has three levels, as defined in the README. Each level builds on the one before it. Levels 2 and 3 are outlines and will be expanded next. Decisions from the README (section 8) are reflected here; only open question 9 (support matrix) remains.
+This plan has three levels, as defined in the README. Each level builds on the one before it. Levels 2 and 3 are outlines and will be expanded next. Decisions from the README (section 8) are reflected here. Open items are listed in 1.15.
 
 | Level | Document | Output | Status |
 |---|---|---|---|
@@ -32,7 +32,7 @@ The POC is a **CLI proof of concept** that proves the core loop: collect, diagno
   - Web UI.
   - Release hardening (signed artifacts, full support matrix).
 
-**POC done when:** a diagnosis run on an Ubuntu host with a known fault (for example, a broken resolver) reports the right finding and, after confirmation, the guided fix resolves it. The rental check blocks the same fix while a test container is running.
+**POC done when:** a diagnosis run on an Ubuntu host with a known fault (for example, a broken resolver) reports the right finding and, after confirmation, the guided fix resolves it. The rental check blocks the same fix while a simulated active rental is running, and it reports `unknown` (and blocks) when that evidence is removed.
 
 ---
 
@@ -70,13 +70,13 @@ Core use cases:
   (dmesg, /proc, sysfs,  (nvidia-smi,      (daemon, GPU       (systemd unit,
    smartctl, DNS, ports)  NVML, driver)     runtime, test run) local logs)
                                                 |
-                                  [network checks only]
+                                  [opt-in outbound probes only]
                                                 |
                                  Public endpoints (DNS, Vast
                                  domains, speed-test servers)
 ```
 
-The tool reads local state. It only talks to the network for network checks (DNS lookup, connectivity test, speed test). It never calls the Vast API.
+The tool reads local state. By default it talks to the network only for local DNS lookups. Outbound probes and speed tests run only after explicit opt-in. It never calls the Vast API.
 
 ### 1.4 Architecture overview
 
@@ -97,7 +97,7 @@ The tool has six parts. Each part has one job and a narrow interface.
 | 3 | **Rule engine** | Match facts against diagnosis rules. Produces findings with severity, evidence, and cause. | `Fact` models, rule files | `Finding` models |
 | 4 | **Fix engine** | Run named, whitelisted fixes. Supports dry-run and undo notes. Enforces rental safety. | `Finding`, user confirmation | Action log, result |
 | 5 | **Reporter** | Format results. Apply redaction. Write files. | `Finding`, `Fact`, action log | Terminal output, JSON, Markdown |
-| 6 | **Rule and fix catalogue** | Versioned data files: rules, thresholds, fix definitions. | Files shipped with the tool | Loaded at startup |
+| 6 | **Rule data and fix registry** | Rule files hold conditions, thresholds, and text only. Fix commands, risk classes, rental gates, and privilege rules live in reviewed code, never in rule files. | Files shipped with the tool; code | Loaded at startup |
 
 ### 1.5 Collector areas
 
@@ -114,7 +114,7 @@ Each collector is independent, so one failing collector never stops the others.
 | `pcie` | Link width and speed, AER errors | `lspci -vv`, sysfs, kernel log |
 | `kernel_log` | NVRM / Xid messages, PCIe errors, I/O errors | `dmesg` or `journalctl -k` (needs root) |
 | `docker` | Daemon up, version, NVIDIA runtime present, a short GPU test run | `docker info`, `docker run --gpus` |
-| `network` | DNS resolution of Vast domains, outbound reachability, latency, open ports | `getaddrinfo`, TCP connect tests |
+| `network` | DNS resolution of Vast domains (local, default). Outbound reachability and speed tests are opt-in, with destinations listed first. Open ports are out of POC scope. | `getaddrinfo`; outbound probes only with explicit opt-in |
 | `bandwidth` | Download/upload throughput | Speed test to third-party servers (approved). Out of POC scope. |
 | `vast_host` | Vast daemon status and log | `systemctl status vastai.service` (unit `vastai.service`, "Vast.ai Host Daemon"); `/var/lib/vastai_kaalia/kaalia.log` |
 | `security` | Kernel version against known-vulnerable list, driver version against minimum | Rule data plus `uname` and `nvidia-smi` |
@@ -129,7 +129,7 @@ Note: checked against the Vast docs in Level 2. See "Verified requirements" belo
 - **FixAction**: `{ id, description, requires_root, requires_no_active_rental, dry_run_output, undo_notes }`.
 - **Report**: `{ host_summary, generated_at, findings[], facts[], actions[], redaction_applied }`.
 
-Severity uses three levels. Category tells the operator which Vast status the problem affects.
+Severity uses three levels. Category tells the operator which Vast status the problem affects. Check status is `pass`, `fail`, `unknown`, or `skipped`. A missing or unknown critical input makes the diagnosis incomplete, even when no rule fired. Unknown is never reported as pass. The JSON schema is versioned, and rule source and date are recorded. The tool estimates local conditions only. It does not determine marketplace status.
 
 ### 1.7 Key flows
 
@@ -163,7 +163,7 @@ Severity uses three levels. Category tells the operator which Vast status the pr
 | DNS lookup for Vast domains fails, network up | Broken DNS resolver | Offline | Check `/etc/resolv.conf` and resolver service |
 | Kernel log shows NVRM Xid errors | GPU or driver fault | Offline / unverified | Collect Xid code, check driver version, check PSU and riser |
 | `nvidia-smi` fails, driver loaded | Driver and library mismatch | Unverified | Reinstall driver matching the minimum version |
-| Driver outdated | Outdated driver | Unverified (if confirmed) | Report driver version and warn. Vast publishes no numeric driver minimum, so no hard threshold yet. |
+| Driver below Vast table minimum for its GPU generation | Outdated driver | Unverified (if confirmed) | Advisory. Show the installed version and the table minimum. Unlisted branches show as unknown. |
 | CUDA version below 11.8 (12.6 on ARM64) | Outdated CUDA stack | Unverified | Update driver or CUDA |
 | Forwarded ports below 5 per GPU (self-test fails below 3 direct ports) | Firewall or router config | Unverified | List closed ports, check firewall rules and router forwarding |
 | PCIe bandwidth below 2.85 GiB/s per GPU | Bad slot, riser, or BIOS setting | Performance / unverified | Check slot and BIOS settings |
@@ -185,9 +185,16 @@ Thresholds are read from rule data, not hard-coded. The values used here are fro
 - **Rental safety:** Fixes that restart services, reboot, or stop containers check for active rentals first. If the check cannot be made, the fix is blocked.
   - **Detection method is not yet known.** The Vast docs do not say rentals run as Docker containers. They do show per-container states ("running", "exists (stopped)") and a "running (vm)" state, so a Docker-only check would miss VM rentals.
   - Candidate sources to inspect on a real host: the Vast daemon log (`/var/lib/vastai_kaalia/kaalia.log`), running Docker containers, and VM state.
-  - This is blocked until a real Vast host (or a faithful test host) is available to inspect.
-- **Data handling:** Local only by default. Redaction on by default. No customer data is read.
+  - Rule (from the design review): the state is `active`, `none`, or `unknown`. `none` needs fresh, complete evidence from every supported backend: VM, container, and allocated-but-stopped workloads. Missing, stale, unreadable, or conflicting evidence gives `unknown`.
+  - `active` and `unknown` block disruptive fixes, including after the operator confirms.
+  - The state is checked again after confirmation and immediately before any change.
+  - A host-local lock only serializes this tool. It does not stop Vast from assigning a new workload. Disruptive fixes stay advisory on production hosts unless a maintenance state can be verified.
+  - Blocked until a real Vast host (or a faithful test host) is available to inspect.
+- **Data handling:** Local only by default. Shareable output is built from allowlisted typed fields only: no raw log lines, command lines, or excerpts. Redaction is a second layer. No customer data is read.
 - **Docker on Windows:** Dev/test only. The container runs with the smallest set of mounts and devices needed. The design avoids `--privileged`. GPU access through Docker Desktop on Windows is limited and is verified in M8.
+- **Privilege and target policy:** The tool runs as the invoking user. Elevated reads go through a fixed set of operations with approved argument schemas and a minimal environment, not through free-form `sudo`. Read collectors never change the system.
+- **Docker access:** The default has no Docker socket mount and no remote daemon. `DOCKER_HOST`, Docker contexts, and other environment overrides are rejected when they point away from a trusted local endpoint. The Windows dev container runs non-root with no host socket, no host filesystem or log mounts, and no elevated capabilities.
+- **Fix recovery:** Every fix states its target, expected change, failure behavior, and post-checks. Reversible file changes keep owner, mode, and prior content. A daemon restart cannot be undone by rollback: an interrupted workload cannot be restored. DNS changes are not a live-host POC fix. They are demo-only on a disposable VM and go through the resolver that owns the config.
 - **Secrets:** No secrets in the code, the report, or the logs.
 - **Full rules:** See [README.md section 6](README.md#6-security-guidelines).
 
@@ -233,18 +240,18 @@ Thresholds are read from rule data, not hard-coded. The values used here are fro
 
 ### 1.15 Decisions and open items
 
-Decided (see [README.md section 8](README.md#8-open-questions)): Windows is dev/test only, offline with no Vast API, diagnose and fix, rental detection on, CLI, shareable report, `uv` package, third-party speed tests allowed, MIT license.
+Decided (see [README.md section 8](README.md#8-decisions-and-open-questions)): Windows is dev/test only, offline with no Vast API, diagnose and fix, rental detection on, CLI, shareable report, `uv` package, third-party speed tests allowed, MIT license.
 
 Still open:
 - Support matrix (Ubuntu and NVIDIA driver versions).
 - Rental detection method (see 1.9). Blocked on a real host.
 - First set of fixes for the POC.
-- Driver policy: Vast publishes no numeric minimum, so the tool can only report the driver version.
+- Driver: compare the installed driver with Vast's driver table (see Verified requirements). Advisory in the POC.
 
 ### 1.16 Sources (checked 2026-11-23)
 
-- Vast.ai host docs (fetched): [verification stages](https://docs.vast.ai/host/verification-stages), [machine offline](https://docs.vast.ai/host/machine-offline), [how to self-test](https://docs.vast.ai/host/how-to-self-test), [SSD health](https://docs.vast.ai/host/ssd-health), [machine metrics](https://docs.vast.ai/host/machine-metrics), [hosting overview](https://docs.vast.ai/host/hosting-overview).
-- Not yet read: the host setup guide (https://cloud.vast.ai/host/setup/), the driver upgrade and kernel upgrade pages, and the "Understanding Verification" page. Some answers may be there.
+- Vast.ai host docs (fetched): [verification stages](https://docs.vast.ai/host/verification-stages), [machine offline](https://docs.vast.ai/host/machine-offline), [how to self-test](https://docs.vast.ai/host/how-to-self-test), [SSD health](https://docs.vast.ai/host/ssd-health), [machine metrics](https://docs.vast.ai/host/machine-metrics), [hosting overview](https://docs.vast.ai/host/hosting-overview), [NVIDIA driver upgrade](https://docs.vast.ai/host/upgrade-nvidia-driver), [Understanding Verification](https://docs.vast.ai/host/understanding-verification).
+- Not yet read: the host setup guide (https://cloud.vast.ai/host/setup/), the kernel upgrade page, and the SSH and Secure Boot pages. Some answers may be there.
 
 
 The pages were fetched and read on 2026-11-23. Corrections from that read:
@@ -274,7 +281,7 @@ These come from the Vast pages named in 1.16. Each row says where it came from. 
 | Forwarded ports | 5 per GPU minimum; 100 per GPU recommended | `network` |
 | OS | Ubuntu Server 22.04 LTS minimum; 24.04 LTS recommended. Desktop editions not supported | `system` |
 | Kernel | Latest security patch level for the LTS release. No version number published | `system` (report only) |
-| NVIDIA driver | "A currently supported release". No numeric minimum published | `driver` (report only) |
+| NVIDIA driver | Vast "Upgrade the NVIDIA Driver" table (checked 2026-11-23): Turing and newer (compute 7.5+) on 595.xx: minimum 595.91.07; Turing and newer on any other branch: minimum 610.57.04; Maxwell, Pascal, Volta (compute below 7.5): minimum 580.178.04. Branches newer than the table (e.g. 620) are "not directly supported yet". | `driver` (compare with table; advisory in POC) |
 | SSH | Keys only; password login disabled | `security` |
 | Secure Boot | Disabled | `security` |
 | Storage | SSD. Dedicated Docker drive of at least 200 GB. At least 20 GB free on the root partition | `disk` |
@@ -299,7 +306,7 @@ These come from the Vast pages named in 1.16. Each row says where it came from. 
 
 1. Connectivity, all three must pass: `ping -c 4 1.1.1.1`, `nslookup vast.ai`, `curl -4 ifconfig.me`.
 2. Service and GPUs: `sudo systemctl status vastai` (unit `vastai.service`). `nvidia-smi` must list every GPU. Logs: `sudo tail -n 100 /var/lib/vastai_kaalia/kaalia.log`, `sudo dmesg -T | grep -iE 'nvrm|nvidia|xid|pcie|aer'`, `sudo journalctl -k -b | grep -iE 'nvrm|nvidia|xid|pcie|aer'`.
-3. Controller reset (only if the service runs and all GPUs are seen, but the host stays Offline). Stops the service and deletes controller state files under `/var/lib/vastai_kaalia/`. **This is a disruptive fix. It must be behind the rental check, and the page does not say it is safe with active rentals.**
+3. Controller reset (only if the service runs and all GPUs are seen, but the host stays Offline). Stops the service and deletes controller state files under `/var/lib/vastai_kaalia/`. **This is a disruptive fix. It must be behind the rental check, and the page does not say it is safe with active rentals.** The vendor procedure also resends machine information. Keep it as a link to the vendor runbook for operator-led maintenance, not a POC fix.
 4. Contact Vast Support with machine ID, offline time, and logs (redacted).
 
 **Warnings on the offline page:** do not reboot, stop containers, force-stop VMs, delete instance data, or change NVIDIA drivers while rentals are active, unless Vast Support says so.
@@ -313,9 +320,9 @@ These come from the Vast pages named in 1.16. Each row says where it came from. 
 - Packages: smartmontools 7.4 on Ubuntu 24.04. NVMe self-tests need 7.4; on 22.04 use `nvme-cli`.
 - Read-only steps are safe with instances running. Self-tests compete with client I/O.
 
-**Not published by Vast (must be decided by us, not invented):** NVIDIA driver minimum, kernel version minimum, numeric speed or PCIe threshold in the self-test, de-verification thresholds, and the rental-detection method.
+**Not published by Vast (must be decided by us, not invented):** kernel version minimum, numeric speed or PCIe threshold in the self-test, de-verification thresholds, and the rental-detection method.
 
-**Pages not yet read:** host setup guide (https://cloud.vast.ai/host/setup/), driver upgrade, kernel upgrade, "Understanding Verification", SSH and Secure Boot pages.
+**Pages not yet read:** host setup guide (https://cloud.vast.ai/host/setup/), kernel upgrade, SSH and Secure Boot pages. The driver upgrade page and Understanding Verification were read on 2026-11-23. Understanding Verification does not split newly evaluated from previously verified machines.
 
 ---
 
@@ -345,7 +352,7 @@ These come from the Vast pages named in 1.16. Each row says where it came from. 
 
 ## Level 3: Working system (outline)
 
-**Goal:** A running tool, built in milestones. Each milestone is usable on its own.
+**Goal:** A running tool, built in milestones. Each milestone is usable on its own. [STEPS.md](STEPS.md) is the authoritative step list. The milestones below are a summary.
 
 | Milestone | Scope | Acceptance criteria (summary) |
 |---|---|---|

@@ -84,7 +84,7 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
   - `Severity`: critical, warning, info.
   - `Category`: offline, unverified, performance, info.
   - `Finding`: `rule_id`, `severity`, `category`, `summary`, `evidence` (fact keys), `recommendation`, `fix_id` (optional).
-- Redaction is not part of this step. It is in step 16.
+- Define the shareable schema here: allowlisted, typed fields only (for example an Xid code, a service state, or an aggregate count). The shareable model never carries raw log lines, command lines, or excerpts. Redaction is a second layer, added in step 16.
 
 **Verify:**
 - Unit tests for validation: missing required fields fail, unknown status fails, JSON round-trip works.
@@ -106,10 +106,13 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
   - Missing binary returns status `missing`. Non-zero exit returns status `error` with stderr.
   - Captures stdout and stderr. Output is treated as data only.
 - A fake runner for tests, which returns fixture output keyed by command.
-- Root is never escalated by the runner itself. If a command needs root, the runner reports that and does not run it unless the user has allowed root reads (see step 12).
+- Privilege policy, decided before any collector runs: the tool and runner run as the invoking user. Elevated reads go through fixed operations only, each with an approved executable path, argument schema, and minimal environment. Dynamic operands (such as block-device names) are checked against a trusted enumeration first. No free-form `sudo`.
+- Endpoint policy: the runner rejects `DOCKER_HOST`, Docker contexts, and other overrides that point away from a trusted local endpoint. Remote daemons are refused.
+- Read and mutation allowlists are separate. There is no mutation allowlist until step 14.
+- A timeout kills the child process and drains bounded output. Pagers and interactive prompts are disabled.
 
 **Verify:**
-- Tests for: allowlisted command runs, unknown command refused, timeout, missing binary, non-zero exit, no shell is used (passed to subprocess as list with `shell=False`).
+- Tests for: allowlisted command runs, unknown command refused, timeout, missing binary, non-zero exit, no shell is used (passed to subprocess as list with `shell=False`), refusal of unexpected operands, refusal of inherited `DOCKER_HOST` and remote daemon selection, denied permissions.
 - Tests pass on Windows and Linux.
 
 **Commit:** `feat(runner): add allowlisted, timeout-bounded command runner`
@@ -157,7 +160,7 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Know whether Docker runs and whether the NVIDIA runtime is set up.
 
 **Scope:**
-- `docker info` (daemon up, version, runtimes list, Docker Root Dir).
+- `docker info` through the trusted local endpoint only (step 3). Refuses `DOCKER_HOST` and contexts pointing elsewhere. Reports daemon up, version, runtimes list, and Docker Root Dir.
 - Reports whether the NVIDIA runtime appears in the runtimes list.
 - The GPU test run (`docker run --gpus all ...`) is **not** in this step. It pulls an image and uses the GPU, so it is a later, opt-in check.
 - Fixtures: daemon running with NVIDIA runtime, daemon running without it, daemon not running.
@@ -176,7 +179,7 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Scope:**
 - Reads `journalctl -k -b --no-pager` and falls back to `dmesg -T` if journalctl is missing. Both may need root. The collector reports "needs root" as a fact if it cannot read them.
 - Extracts lines matching `nvrm`, `xid`, `aer`, `pcie`, and I/O errors from the SSD health page patterns.
-- Keeps the matched lines as evidence (redacted later in step 16). Each Xid code is reported as its own fact.
+- Facts hold bounded, typed evidence: Xid code, count, first and last timestamp, and boot scope. Raw matched lines are not stored in facts or reports. Findings are limited to the current boot or a stated time window, and recurrence is reported.
 - Fixtures: a log with Xid 79 (GPU fell off bus), a log with AER errors, a clean log.
 
 **Verify:**
@@ -192,7 +195,7 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 
 **Scope:**
 - DNS: resolve `vast.ai` with `socket.getaddrinfo`. Timeout-bounded.
-- Outbound: TCP connect to `1.1.1.1:443` and to `8.8.8.8:53` (both with a timeout).
+- Outbound probes are **off by default**. They run only with `--allow-outbound`. Before running, the command lists the destinations and what each probe reveals. Probes are bounded in time and count, and send no credentials. The probes are TCP connects to `1.1.1.1:443` and `8.8.8.8:53`.
 - Reads `/etc/resolv.conf` and reports the configured nameservers as facts.
 - No ping and no HTTP call in this step. The `curl -4 ifconfig.me` check from the Vast docs is deferred (it sends the host's public IP to a third party, so it needs an explicit user choice).
 - Ports (5 per GPU) are **not** checked in this step.
@@ -211,7 +214,7 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 
 **Scope:**
 - `systemctl is-active vastai.service` and `systemctl show vastai.service -p ActiveState,SubState,NRestarts`. Reports restart loops.
-- Reads the last 100 lines of `/var/lib/vastai_kaalia/kaalia.log` if the file is readable. Keeps only lines that match error patterns, not the whole log.
+- Reads the last 100 lines of `/var/lib/vastai_kaalia/kaalia.log` if the file is readable. Facts hold typed evidence only: error category, count, and last matching time. No raw log lines.
 - Reports missing file and missing service as separate facts.
 - Fixtures: active, inactive, failed, restart loop, missing unit.
 
@@ -284,8 +287,9 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 - `vast-troubleshooter diagnose` runs all collectors, evaluates all rules, and prints findings sorted by severity.
 - Each finding shows its summary, evidence, and recommendation.
 - Output modes: human (Rich), `--json`.
-- Flag `--allow-root-reads`: lets collectors run `sudo`-prefixed read commands. Default off. The tool prints which commands need root.
-- Exit codes: 0 no critical findings, 1 critical findings, 2 tool error.
+- Flag `--allow-root-reads`: lets collectors use the fixed elevated read operations from step 3. Default off. The tool prints which commands need root.
+- Exit codes: 0 complete with no critical findings, 1 critical findings, 2 tool error, 3 incomplete (a critical check is `unknown` or `skipped`).
+- Local only by default. Outbound probes need `--allow-outbound` (step 8).
 - No fixes in this step.
 
 **Verify:**
@@ -303,11 +307,12 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Scope:**
 - Investigate candidate sources on a real host (see blockers): daemon log, Docker containers, VM state.
 - Write a short finding document `docs/rental-detection.md` with what was seen and the chosen method.
-- Implement `rentals.py` with a `RentalState` result: `active`, `none`, or `unknown`. `unknown` blocks disruptive fixes.
+- Implement `rentals.py` with a `RentalState` result: `active`, `none`, or `unknown`. `none` needs fresh, complete evidence from every supported backend (VM, container, allocated-but-stopped). Missing, stale, unreadable, or conflicting evidence gives `unknown`. `active` and `unknown` both block disruptive fixes, even if the operator confirms.
 - Add a fact `rentals` to the diagnose output.
 
 **Verify:**
 - Tests for each state using fixtures from the real host.
+- Acceptance cases: VM-only activity; stopped but allocated workload; permission failure; stale or conflicting sources; state change between confirmation and mutation; two concurrent fix invocations.
 - Manual: confirm `unknown` on a host where detection is impossible, and that fixes are blocked.
 
 **Commit:** `feat(rentals): add rental detection with active, none, and unknown states`
@@ -325,6 +330,9 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 - Fix engine checks, in order: fix is in the whitelist, root is allowed, rental state is `none` if required. Any failure stops the fix and says why.
 - Dry run is the default. `apply` requires typing the fix id, not just "yes".
 - Every run writes an action log entry (JSON lines) with time, fix id, commands, result, and undo notes.
+- Rental state is checked again after confirmation and immediately before the change.
+- A lock serializes this tool's own runs. It does not stop Vast from assigning workloads, and this step does not claim it does. Disruptive fixes stay advisory on production hosts unless a maintenance state can be verified.
+- Each fix states its target, expected change, and postconditions. A timeout ends in an observed final state or an explicit `indeterminate` outcome.
 - After `apply`, the affected collectors re-run and the finding is re-checked.
 
 **Verify:**
@@ -340,8 +348,8 @@ Steps 0 to 4 and most of 9 to 12 need no hardware. They can run on this Windows 
 **Goal:** Real fixes for the POC, chosen by the user (blocker: first fix set).
 
 **Scope (proposed, to be confirmed):**
-- `restart-vast-daemon`: `systemctl restart vastai.service`. Requires root and no active rental. Undo: none needed, the service restarts.
-- `fix-dns-resolver`: restores a public resolver in the system resolver config. Requires root and no active rental. Keeps a backup of the old config for undo. *(Exact method depends on systemd-resolved vs static resolv.conf. Checked on a test host.)*
+- `restart-vast-daemon`: `systemctl restart vastai.service`. Requires root and rental state `none`. Pre-check: unit state. Post-check: service active and stable for a set period. A failed restart is reported with the observed state. Rollback does not restore interrupted workloads.
+- `fix-dns-resolver`: **demo only, not a live-host fix.** Changes DNS through the resolver that owns the config (systemd-resolved or Netplan, checked per case). Captures the pre-state, verifies it still matches after confirmation, and restores it on rollback. Needs an independent recovery path. Ambiguous cases (VPN, split DNS, static files) stay advisory.
 
 Not in the first set, because they are disruptive or unverified: controller reset (Vast docs step 3), driver changes, reboots.
 
@@ -360,7 +368,7 @@ Not in the first set, because they are disruptive or unverified: controller rese
 **Scope:**
 - `report.py`: writes `report-<timestamp>.json` and `report-<timestamp>.md` to a chosen directory.
 - Contents: host summary, findings, facts, actions taken (from the action log), rental state.
-- Redaction, on by default: IPv4 and IPv6 addresses, hostnames, machine IDs, anything matching key or token patterns, and the user name in paths. `--no-redact` turns it off and prints a warning.
+- Redaction, on by default: IPv4 and IPv6 addresses, hostnames, machine IDs, anything matching key or token patterns, and the user name in paths. There is no `--no-redact` option for shareable reports. The `report` command prints the exact file paths so the operator can preview them before attaching. Report and backup files are created with restrictive permissions, and symlinks and name collisions are handled explicitly.
 - `report` command: runs diagnose and writes the files. Nothing is uploaded.
 
 **Verify:**
@@ -378,7 +386,7 @@ Not in the first set, because they are disruptive or unverified: controller rese
 
 **Scope:**
 - `Dockerfile` based on Ubuntu, installs the package with `uv`.
-- `docker-compose.yml` or a documented `docker run` command. Mounts only what is needed. No `--privileged`.
+- `docker-compose.yml` or a documented `docker run` command. Non-root. Default: no Docker socket, no host filesystem or log mounts, no host namespaces, no elevated capabilities, no `--privileged`. GPU passthrough is optional, for the WSL 2 setup only, and its facts are labelled as container/WSL observations.
 - Documents what works in the container and what does not (GPU access through Docker Desktop is limited). Ties to the verification in this step.
 - `README.md` gets a short "Run on Windows (dev/test)" section.
 
@@ -399,7 +407,7 @@ Not in the first set, because they are disruptive or unverified: controller rese
 - On a disposable Ubuntu VM, inject a known fault: break DNS resolution for `vast.ai`.
 - Run `diagnose`. It must report the DNS finding.
 - Run the DNS fix in dry-run, then apply with confirmation. Re-run `diagnose`. The finding must clear.
-- Start a test container to simulate an active rental. Confirm the fix is blocked while it runs.
+- Simulate an active rental using the evidence sources chosen in step 13, not only a test container. Confirm the fix is blocked. Remove that evidence and confirm the state becomes `unknown` and the fix stays blocked.
 - Generate a report. Check it is redacted.
 - Record the results in `docs/poc-results.md`.
 
@@ -420,6 +428,7 @@ Not in the first set, because they are disruptive or unverified: controller rese
 - Install from the built wheel into a clean environment and run `vast-troubleshooter --help`.
 - Version bumped to `0.1.0` in `pyproject.toml`, with a CHANGELOG entry.
 - Checksums for the built artifacts.
+- Frozen install from the committed lockfile. Build verified from a clean checkout. Container base image pinned by digest. Document how security fixes reach users.
 
 **Verify:**
 - Clean install works. `--help`, `version`, and `diagnose --json` run.
@@ -430,7 +439,10 @@ Not in the first set, because they are disruptive or unverified: controller rese
 
 ## Open items that can change this plan
 
-- The support matrix (Ubuntu and NVIDIA driver versions) is not decided.
+- This file is the authoritative step list. The milestone table in PLAN.md is a summary.
+- The support matrix (Ubuntu versions and driver branches) is not decided. Vast's driver table is now known (checked 2026-11-23), so the matrix only needs to choose which rows the POC supports.
+- Python 3.15 availability in `uv` is checked in step 1. If it is not available, the Python pin needs a decision before step 2.
+- The design review said Understanding Verification splits newly evaluated from previously verified machines. Checked 2026-11-23: the page does not say that, so no such rule is planned.
 - Secure Boot and SSH checks need collectors that are not in the steps above yet. They can be added as a new step before step 11, if confirmed.
 - The "Understanding Verification" page and the host setup guide have not been read. They may change thresholds or add checks.
 - Rental detection (step 13) is blocked on real host access.

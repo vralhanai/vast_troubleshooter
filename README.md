@@ -48,7 +48,7 @@ Note on "offline": this means no Vast API. Network checks (DNS, outbound reachab
 Based on public Vast.ai host documentation ([machine offline](https://docs.vast.ai/host/machine-offline), [verification stages](https://docs.vast.ai/host/verification-stages), [self-test](https://docs.vast.ai/host/how-to-self-test), [SSD health](https://docs.vast.ai/host/ssd-health)):
 
 - **Offline:** broken DNS (cannot resolve `vast.ai`), host service not running, GPUs not detected, NVIDIA Xid / NVRM / PCIe AER errors in kernel logs, host daemon stuck (controller reset needed).
-- **Unverified:** CUDA below 11.8, too few forwarded ports (5 per GPU), network instability, low bandwidth, insufficient PCIe bandwidth, failing storage, `nvidia-smi`/NVML failures, container device-init errors, a kernel with a known exploited vulnerability. Vast publishes no numeric NVIDIA driver minimum. See [PLAN.md](PLAN.md#verified-requirements-vast-docs-checked-2026-11-23).
+- **Unverified:** CUDA below 11.8, too few forwarded ports (5 per GPU), network instability, low bandwidth, insufficient PCIe bandwidth, failing storage, `nvidia-smi`/NVML failures, container device-init errors, a kernel with a known exploited vulnerability, a driver below Vast's minimum for its GPU generation (Vast's driver table). See [PLAN.md](PLAN.md#verified-requirements-vast-docs-checked-2026-11-23).
 - **Underperforming:** thermal throttling, low clocks, memory errors, slow disk, slow network.
 
 ## 5. Proposed tech stack
