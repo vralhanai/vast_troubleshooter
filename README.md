@@ -83,7 +83,24 @@ Based on public Vast.ai host documentation ([machine offline](https://docs.vast.
 - [STEPS.md](STEPS.md): the step-by-step build plan with progress checkboxes.
 - [BACKLOG.md](BACKLOG.md): what was skipped, what is unverified, and what to do once a real Vast host, an Ubuntu machine, or an API key is available.
 - [docs/rental-detection.md](docs/rental-detection.md): how rental detection works today and what is needed to finish it.
+- [docs/docker-dev.md](docs/docker-dev.md): running and testing the Linux tool in a container on Windows.
 - [LICENSE](LICENSE): MIT.
+
+## Run on Windows (dev/test)
+
+Vast does not accept Windows hosts, so the tool targets Ubuntu. To build and test
+it on a Windows machine, run the Linux tool in a hardened container (non-root,
+read-only, no capabilities, no Docker socket, no host folders):
+
+```powershell
+docker compose run --rm vast-troubleshooter diagnose   # the tool
+docker compose run --rm tests                          # the whole test suite on real Linux
+```
+
+A container is **not** a Vast host: it cannot see a host's kernel log, drives,
+systemd, GPUs, or rentals, and the tool says so in its output. What works and
+what does not, including the observed GPU limits, is in
+[docs/docker-dev.md](docs/docker-dev.md).
 
 ## 8. Decisions and open questions
 

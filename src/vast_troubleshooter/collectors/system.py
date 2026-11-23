@@ -8,6 +8,8 @@ from vast_troubleshooter.models import Fact, FactStatus
 
 OS_RELEASE = "/etc/os-release"
 PROC_UPTIME = "/proc/uptime"
+PROC_VERSION = "/proc/version"
+CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
 
 
 def parse_os_release(text: str) -> dict[str, str]:
@@ -28,7 +30,12 @@ class SystemCollector(Collector):
     name: ClassVar[str] = "system"
 
     def collect(self, ctx: HostContext) -> list[Fact]:
-        return [*self._os(ctx), self._kernel(ctx), self._uptime(ctx)]
+        return [
+            *self._os(ctx),
+            self._kernel(ctx),
+            self._uptime(ctx),
+            *self._environment(ctx),
+        ]
 
     def _read(self, ctx: HostContext, path: str) -> tuple[str | None, Fact | None]:
         """Read an allowlisted file. Returns (text, None) or (None, failure fact)."""
@@ -101,3 +108,51 @@ class SystemCollector(Collector):
         return self.fact(
             "system.uptime_seconds", seconds, unit="s", source_command=source
         )
+
+    def _environment(self, ctx: HostContext) -> list[Fact]:
+        """Is this a container or WSL, not a physical or virtual host?
+
+        Inside a container the kernel log, drives, systemd, GPUs and rentals
+        describe the container, not a Vast host, so reports must say so.
+        """
+        keys = ("system.in_container", "system.on_wsl_kernel", "system.environment")
+        source = f"read {PROC_VERSION}"
+        try:
+            version = ctx.files.read_text(PROC_VERSION)
+        except FileNotFoundError:
+            # No /proc/version: not Linux, so "not a container" cannot be claimed.
+            return [
+                self.fact(k, status=FactStatus.MISSING, source_command=source)
+                for k in keys
+            ]
+        except OSError as exc:
+            return [
+                self.fact(
+                    k,
+                    status=FactStatus.ERROR,
+                    source_command=source,
+                    raw_excerpt=type(exc).__name__,
+                )
+                for k in keys
+            ]
+        wsl = "microsoft" in version.lower() or "wsl" in version.lower()
+        in_container = False
+        for marker in CONTAINER_MARKERS:
+            try:
+                ctx.files.read_text(marker)
+                in_container = True
+            except OSError:
+                continue  # absent or unreadable: that marker is not seen
+        if in_container and wsl:
+            label = "container on a WSL2 kernel"
+        elif in_container:
+            label = "container"
+        elif wsl:
+            label = "WSL2"
+        else:
+            label = "physical or virtual machine"
+        return [
+            self.fact("system.in_container", in_container, source_command=source),
+            self.fact("system.on_wsl_kernel", wsl, source_command=source),
+            self.fact("system.environment", label, source_command=source),
+        ]

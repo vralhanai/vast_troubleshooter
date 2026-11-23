@@ -1,0 +1,5 @@
+NAME="sda" ROTA="1" SIZE="758411264" MODEL="Virtual Disk    " TRAN=""
+NAME="sdb" ROTA="1" SIZE="133427200" MODEL="Virtual Disk    " TRAN=""
+NAME="sdc" ROTA="1" SIZE="2147487744" MODEL="Virtual Disk    " TRAN=""
+NAME="sdd" ROTA="1" SIZE="1099511627776" MODEL="Virtual Disk    " TRAN=""
+NAME="sde" ROTA="1" SIZE="135401472" MODEL="Virtual Disk    " TRAN=""

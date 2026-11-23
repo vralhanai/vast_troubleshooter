@@ -60,13 +60,22 @@ raw command output (sanitized), and replace the fixtures in `tests/fixtures/`.
 | P2 | `system/` | `/etc/os-release`, `uname -r`, `/proc/uptime` on 22.04 and 24.04. |
 | P2 | `vast_host/` | See section 2. |
 
-### 3b. Linux-only code that has never run
+### 3b. Linux-only code
 
-- Process-group kill on timeout, the safe `PATH`, and the real `sudo -n --` path (runner).
-- `flock` lock, owner-only (0600) log and lock files, refusal to write through a symlink (fix engine). One POSIX-only test is skipped on Windows.
-- `ip route`, `resolvectl dns / revert / flush-caches`, and `systemctl is-active` behavior.
-- `docker ps -a --format {{.State}}` through the pinned socket.
-- A manual run of `diagnose` as a normal user, with `sudo`, and with `--allow-root-reads`.
+**Update (step 17):** the whole suite now runs on real Linux in a container
+(`docker compose run --rm tests`, Ubuntu 24.04, arm64, non-root): 710 passed. That
+covered the process-group kill on timeout, the safe `PATH`, the `flock` lock,
+owner-only (0600) files, refusal to follow or write through a symlink, and the
+world-writable-directory refusal. A report was also written on real Linux and the
+files came out `-rw-------`. See `docs/docker-dev.md`.
+
+Still open, because a container cannot test it:
+
+- The real `sudo -n --` path (the container user has no sudo).
+- `resolvectl dns / revert / flush-caches` and `systemctl is-active` behavior (no systemd in the container).
+- `docker ps -a --format {{.State}}` through the pinned socket (no Docker socket, on purpose).
+- A manual run of `diagnose` as a normal user, with `sudo`, and with `--allow-root-reads`, **on a real host**.
+- **x86_64.** The images have only ever been built and run for `linux/arm64` (this laptop). Real Vast hosts are x86_64. The Dockerfile uses multi-arch base images, but an `amd64` build has never been run.
 
 ### 3c. Decisions this unlocks
 
@@ -158,7 +167,7 @@ The data is there; the rules are not. Cheap wins once the thresholds are confirm
 Not done yet, in `STEPS.md`:
 
 - **Step 16:** shareable JSON and Markdown report with redaction. The design review asks for: an allowlisted schema as the main protection (redaction is a second layer), **no `--no-redact`**, restrictive file permissions, symlink and collision handling, a preview of exact files before sharing, no uploads, a local-only default, retention rules, and tests that seeded secrets never appear in any output including error paths. Open: how a support routing identifier is added (explicitly, opt-in).
-- **Step 17:** Docker image for Windows dev and test. Non-root, no Docker socket, no host mounts. GPU passthrough only for the supported WSL 2 setup, labelled as container observations.
+- **Step 17:** done. See `docs/docker-dev.md`. Follow-ups it created are in section 10.
 - **Step 18:** POC end-to-end test on a disposable Ubuntu VM with a real injected fault. **Needs a VM.**
 - **Step 19:** packaging (`uv build`), checksums, frozen install, a pinned container base image, a changelog, and a documented path for security fixes. The rule TOML files already ship in the wheel (checked once).
 
@@ -196,7 +205,26 @@ Not done yet, in `STEPS.md`:
 
 ---
 
-## 10. Quick start when you get access
+## 10. Found while building the Docker image (step 17)
+
+Real observations from running the tool in a container on a Windows ARM64 laptop
+(2026-11-23). Details are in `docs/docker-dev.md`.
+
+| P | Item | Detail |
+|---|---|---|
+| P1 | **Virtual disks report `rotational = True`.** | All 5 of Docker Desktop's virtual disks reported `ROTA=1`, so `disk.hdd_count` was 5. A future "Docker storage must be an SSD" rule must not trust that flag alone: also consider the transport, the model (`Virtual Disk`), and whether the host is a VM. Also relevant to any VM-based Vast host. |
+| P1 | **`docker.nvidia_runtime_present` can be `True` with no working GPU.** | Docker Desktop lists an `nvidia` runtime as registered even with no NVIDIA GPU, and `docker run --gpus all` then fails (`WSL environment detected but no adapters were found`). The rule text already says registration is not proof. The opt-in GPU test run (section 6) is the real fix. |
+| P1 | **No `amd64` image has ever been built or run.** | Real hosts are x86_64. Build and test both architectures, ideally in CI. |
+| P2 | **GPU passthrough with a real NVIDIA GPU is untested.** | `docker-compose.gpu.yml` exists but was never run on NVIDIA hardware. |
+| P2 | **No automatic update of pinned images.** | `ubuntu:24.04` and `uv` are pinned by digest, updated by hand. Add Dependabot or Renovate, plus a vulnerability scan of the image. |
+| P2 | **Environment awareness is shallow.** | The tool detects container and WSL2 from `/.dockerenv`, `/run/.containerenv`, and `/proc/version`. It does not detect a plain virtual machine, a LXC/Podman container without those markers, or a cloud instance, and it does not change which rules run: it only warns. Consider skipping or labelling host-specific rules when not on a host. |
+| P2 | **Captured fixtures are from a container, not a host.** | `tests/fixtures/real_linux_container/` is real output for `lsblk`, `df`, `findmnt`, `ip route`, `lspci`, `os-release`, `/proc/version`, `resolv.conf`, and the real `tail` and `dmesg` error texts. It does not replace host captures (section 3a). |
+| P3 | **Reading a report out of the Docker volume is clumsy.** | Needs a helper command or a documented copy step (`docker cp`). |
+| P3 | **`docker compose run` leaves images and a pulled `alpine` behind.** | `docker image rm vast-troubleshooter:dev vast-troubleshooter:test` cleans up. |
+
+---
+
+## 11. Quick start when you get access
 
 **You get an Ubuntu machine (no Vast):**
 1. Install, then run every `collect <name>` and `diagnose --json` as a normal user and with `sudo`. Save sanitized raw output.

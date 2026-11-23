@@ -74,6 +74,7 @@ class ReportUnknown(_Closed):
 
 
 class HostSummary(_Closed):
+    environment: str | None = None
     os: str | None = None
     kernel: str | None = None
     gpu_count: int | None = None
@@ -148,6 +149,7 @@ def _ok(facts: Mapping[str, Fact], key: str) -> Any:
 def _host(facts: Mapping[str, Fact]) -> HostSummary:
     os_name = _ok(facts, "system.os_pretty_name")
     return HostSummary(
+        environment=_str(_ok(facts, "system.environment")),
         os=os_name if isinstance(os_name, str) else None,
         kernel=_str(_ok(facts, "system.kernel_release")),
         gpu_count=_int(_ok(facts, "gpu.count")),
@@ -320,6 +322,7 @@ def render_markdown(report: Report) -> str:
     add("## Host")
     add("")
     for label, value in (
+        ("Environment", report.host.environment),
         ("OS", report.host.os), ("Kernel", report.host.kernel),
         ("GPUs", report.host.gpu_count), ("GPU model", report.host.gpu_model),
         ("NVIDIA driver", report.host.driver_version), ("CUDA", report.host.cuda_version),

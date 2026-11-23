@@ -31,6 +31,7 @@ def load(release: str) -> HostContext:
         files={
             OS_RELEASE: (folder / "os-release").read_text(),
             PROC_UPTIME: (folder / "proc_uptime").read_text(),
+            "/proc/version": "Linux version 6.8.0-45-generic (buildd@host) #45-Ubuntu SMP\n",
         },
     )
 

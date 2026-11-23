@@ -14,6 +14,9 @@ DEFAULT_READABLE_FILES = frozenset(
         "/etc/os-release",
         "/proc/uptime",
         "/etc/resolv.conf",
+        "/proc/version",
+        "/.dockerenv",
+        "/run/.containerenv",
     }
 )
 

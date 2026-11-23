@@ -1,0 +1,1 @@
+Linux version 6.18.58.1-microsoft-standard-WSL2 (root@a1fd34a675cf) (gcc (GCC) 13.2.0, GNU ld (GNU Binutils) 2.41) #1 SMP PREEMPT_DYNAMIC Mon Oct 26 23:55:39 UTC 2026

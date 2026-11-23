@@ -47,6 +47,19 @@ class Diagnosis:
         return sorted(found, key=lambda r: (_SEVERITY_ORDER[r.severity], r.rule_id))
 
     @property
+    def environment(self) -> str | None:
+        """'container', 'WSL2', ... when this is not a plain physical or virtual host."""
+        for fact in self.facts:
+            if fact.key == "system.environment" and fact.status.value == "ok":
+                value = fact.value
+                return (
+                    value
+                    if isinstance(value, str) and value != "physical or virtual machine"
+                    else None
+                )
+        return None
+
+    @property
     def incomplete(self) -> bool:
         return any(r.severity is Severity.CRITICAL for r in self.unknown)
 

@@ -1,0 +1,17 @@
+# OPTIONAL. Adds NVIDIA GPU access, for a Windows machine with an NVIDIA GPU,
+# Docker Desktop's WSL 2 backend, and the NVIDIA driver for WSL.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm vast-troubleshooter collect gpu
+#
+# What comes back is a CONTAINER / WSL observation, not a host observation. It
+# shows that nvidia-smi works through Docker Desktop. It says nothing about
+# PCIe, kernel logs, the Vast daemon, or rentals on a real host.
+services:
+  vast-troubleshooter:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

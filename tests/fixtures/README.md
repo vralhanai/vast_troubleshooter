@@ -69,3 +69,16 @@ and trimmed `smartctl -x` output (`smart_nvme_healthy`, `smart_nvme_failing`,
 documented formats and the Vast SSD health page, **unverified against real
 output**. The smartctl fixtures contain made-up serial numbers on purpose, so
 tests can prove they never reach a fact.
+
+## real_linux_container/
+
+**Real output, captured 2026-11-23** inside an Ubuntu 24.04 container (arm64) on
+Docker Desktop's WSL2 kernel. Unlike every other folder here, nothing in it was
+written by hand. It is real Linux, but it is a container, not a host: no GPUs, no
+systemd, virtual disks. Files: `lsblk.txt` (note the padded `MODEL` and the
+`ROTA="1"` on virtual disks), `df_root.txt`, `findmnt_root.txt` (an overlay root
+with a very long options string), `ip_route_default.txt`, `lspci_nvidia.txt`
+(empty: no NVIDIA device), `uname_r.txt`, `os-release`, `proc_version.txt`,
+`proc_uptime.txt`, `resolv.conf` (Docker's own), `tail_missing_log.txt` and
+`dmesg_nonroot.txt` (the real error texts). Tested by
+`tests/test_real_linux_captures.py`. Still needed: the same from a real host.

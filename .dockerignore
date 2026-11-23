@@ -1,0 +1,17 @@
+# Keep the build context small, and keep local data out of the image.
+.git
+.gitignore
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.claude
+planning
+docs
+*.md
+!README.md
+reports
+my-reports
+.env
+*.env

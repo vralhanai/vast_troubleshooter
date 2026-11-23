@@ -112,6 +112,12 @@ def render_human(diagnosis: Diagnosis, console: Console) -> None:
     facts = {f.key: f for f in diagnosis.facts}
     counts = diagnosis.counts()
     out("[bold]Vast Troubleshooter diagnosis[/bold]")
+    if diagnosis.environment:
+        out(
+            f"[bold yellow]Environment: {escape(safe_text(diagnosis.environment))}.[/bold yellow] "
+            "These results describe this environment, not a Vast host. The kernel log, drives, "
+            "systemd, GPUs, and rentals seen here are not representative."
+        )
     out(
         f"{len(diagnosis.results)} checks: {counts['fail']} problem(s), "
         f"{counts['pass']} ok, {counts['unknown']} could not be checked, "
