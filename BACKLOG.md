@@ -188,7 +188,7 @@ Not done yet, in `STEPS.md`:
 | P2 | **README is out of date.** It still says "Design phase. No working code yet." Add install, usage (`diagnose`, `collect`, `fix`), exit codes, and the security model. |
 | P2 | **PLAN.md is out of date.** The Level 3 milestone table is a summary of an older plan. STEPS.md is authoritative. Update or trim it. |
 | P2 | **`.gitattributes`.** Every commit prints "LF will be replaced by CRLF" warnings on Windows. |
-| P2 | **Untracked files:** `ReviewByCodex.md` (decide: commit as a record or ignore) and `.claude/` (local settings: add to `.gitignore`). |
+| P2 | **`.claude/`** (local Claude Code settings) is untracked: add it to `.gitignore`. (`ReviewByCodex.md`, the design review, is now committed as a record.) |
 | P2 | **Test helpers ship in the package** (`vast_troubleshooter/testing.py`). Move them under `tests/` or mark them as dev-only. |
 | P2 | **Dependency and supply-chain checks:** a vulnerability scan, an update cadence, and pinning. |
 | P3 | **Re-verify thresholds on a schedule.** Every rule records its Vast page and check date (all 2026-11-23). Add a reminder or a link checker. |
