@@ -28,4 +28,34 @@ Runs on Windows with Docker Desktop, Ubuntu 24.04 ARM64, and Debian 13 ARM64. Th
 
 ### Confirmed failure in rollback reporting
 
-With a fake mutation runner, the apply step failed and the undo step also failed with exit 7. The action log correctly recorded the undo error. The engine still returned `rolled_back=True` and added “rolled back” to its reasons, which makes the CLI claim the change was undone. The engine discards the return value from the rollback steps. See [engine.py](src/vast_troubleshooter/fixes/engine.py#L328).
+With a fake mutation runner, the apply step failed and the undo step also failed with exit 7. The action log correctly recorded the undo error. The engine still returned `rolled_back=True` and the CLI claimed the change was undone. Commit `8f35b60` was added during the next round to record failed rollback separately.
+
+## Independent Step 18 fault and repair run
+
+Ubuntu 24.04 ARM64 ran systemd as PID 1 in a private cgroup namespace. Network and filesystem changes were confined to the disposable container. The run used a stand-in Vast service and Docker CLI, plus injected VM evidence for engine tests. The repair commands used real `systemd-resolved`, `resolvectl`, and `systemctl`. The first boot attempt failed because Docker mounted the cgroup path read-only. Mounting a writable cgroup filesystem within the private namespace and bind-mounting it over that path inside the container enabled the run. No host files, sockets, or cgroups were bind-mounted into the container.
+
+| Scenario | Observed result |
+| --- | --- |
+| Healthy DNS baseline | `vast.ai` resolved. `diagnose --json` reported zero findings and exited 3. Eight checks were unknown. |
+| Remove all upstream DNS servers | The lookup failed. Diagnosis exited 1 with only `network.dns_vast_ai_unresolvable`. |
+| Demo flag and rental checks | The CLI refused the DNS repair without the demo flag. A simulated running container produced `active` and blocked apply even with injected VM evidence of `none`. Removing it produced `unknown` in the normal CLI, which still blocked apply. Both refusals exited 1. |
+| DNS dry run and apply | The test harness planned the two `resolvectl` commands without modifying the link. With injected evidence of no rentals, apply exited 0, lookup recovered, and the finding cleared. Diagnosis returned to exit 3 with zero findings. |
+| Manual DNS undo | `resolvectl revert eth0` restored the empty per-link configuration. With the upstream still missing, the DNS finding returned and diagnosis exited 1. |
+| Forced DNS repair failure | Blackhole routes made both public resolvers unreachable. The repair exited 4. Both rollback commands returned `ok` in the action log and the link returned to its original empty DNS configuration. |
+| Stop the stand-in `vastai.service` | Diagnosis exited 1 with only `vast_host.service_not_active`. The normal CLI refused to apply the restart with unknown rentals. The harness dry run left the unit inactive. Harness apply exited 0, the service became active, and the finding cleared. A second apply was blocked because the check already passed. |
+| Report after the repairs | The JSON validated. Both report files were mode `0600` in a mode `0700` directory. The seeded secret, IP, raw field, and test hostname were absent from the JSON, Markdown, and terminal preview. |
+
+The Windows suite in this round returned 768 passed and six POSIX-only skips on the Step 18 snapshot. The project also has a separate [Step 18 transcript](docs/poc-transcript.txt). The results above come from the independent run.
+
+### Confirmed failure restoring existing per-link DNS settings
+
+I set `eth0` to a pre-existing runtime DNS server (`192.0.2.1`) and search domain (`corp.invalid`), then blackholed the original server and both repair targets. Diagnosis found the DNS fault and the harness accepted the setup for dry run. Apply exited 4 and reported “rolled back.” Afterwards, both `resolvectl dns eth0` and `resolvectl domain eth0` were empty. The repair lost both existing settings. This differs from the earlier status bug because the revert command itself succeeded. The precheck accepts this configuration and the undo command resets the link without restoring its previous settings. See [definitions.py](src/vast_troubleshooter/fixes/definitions.py#L92).
+
+### Clean checkout verification
+
+- Ubuntu ran **781 tests** from a Git archive of `8f35b60`, including regressions for failed and timed-out rollback commands. Ruff lint and formatting passed. This confirms the separate failure-reporting fix in the clean snapshot.
+- The lockfile installed with `uv sync --locked`. Two separate builds of `8f35b60` produced matching SHA-256 checksums for the wheel and source distribution. Both archives contained the six rule files and the license. A fresh wheel environment using offline resolution could not resolve `pydantic` from its cache. The registry-backed retry installed the wheel successfully, and `--help`, `version`, and `diagnose --json` ran outside the checkout. Diagnosis exited 3 and its JSON carried the same code.
+
+### Remaining coverage
+
+A standalone Ubuntu VM, live Vast rental evidence, an actual NVIDIA GPU, and an amd64 image run remain unverified in these sessions. The successful applies used injected no-rental evidence in the test harness. The normal CLI correctly refused to apply while its production VM source returned `unknown`.

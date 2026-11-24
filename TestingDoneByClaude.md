@@ -20,8 +20,9 @@ file changed is this one.
 | My adversarial / fuzz campaign | **6 of 10 checks failed or exposed a defect**, 4 passed |
 | My CLI, packaging, and hygiene smoke test | **44 of 48 passed**, 4 failed (2 are real doc defects, 2 are artifacts) |
 | Independent code review agent (`/code-review high src`) | 10 findings, **all 10 reproduced by me** |
-| Second reviewer's report (`CodeReviewByCodex.md`) | 7 claims reproduced by me, the rest **not** independently reproduced |
-| **Distinct open findings** | **31**: 7 safety-critical, 9 medium, 15 low |
+| Second reviewer's report (`CodeReviewByCodex.md`) | **Every code-level claim reproduced by me** (13 of 13). Not run by me: F-26 (seen in step 17, not re-run), F-27 (confirmed by reading and by my own run records), F-32 (their private-cgroup boot) |
+| Second reviewer's two files (`CodeReviewByCodex.md`, `TestingDoneByCodex.md`) | Both read in full; see section 10 |
+| **Distinct open findings** | **32**: 7 safety-critical, 9 medium, 16 low |
 
 The headline: the 775 tests are green, but they did not cover several real gaps.
 Three of them break a rule the project states about itself: **"unreadable input
@@ -67,6 +68,12 @@ These are properties I actively tried to break and could not.
 | Packaging | `uv build`, inspected the wheel, installed it in a clean Python 3.15 venv, ran it | sdist and wheel built; **6 rule files + LICENSE shipped, no tests/e2e/docs leaked**; the clean install ran `version` and saw all 15 rules |
 | Repository hygiene | Scanned all tracked files for token and key patterns, `.env`, keys, large files | **None found** |
 | Real Linux behavior | Whole suite in a container as non-root, including the 6 POSIX-only tests | **Pass** |
+| *Independent confirmations from the second reviewer (their runs, not mine)* | | |
+| Other distribution | `collect system` and the suite on **Debian 13 (arm64)** as well as Ubuntu 24.04 | OS id/version/name/kernel/uptime all `[ok]` (an early snapshot, 189 tests) |
+| Real `sudo -n` | One allowed elevated read as an unprivileged user | Read a root-only synthetic daemon log. (The *timeout* path under `sudo` was not run; see F-07.) |
+| Runner on Linux | Inherited untrusted `PATH`; timeout with a spawned descendant | `PATH` replaced; the descendant was killed |
+| Reproducible build | Two separate builds of `8f35b60` | **Identical SHA-256** for the wheel and the sdist; `uv sync --locked` works. Useful for Step 19. |
+| Clean archive | Full Ubuntu run from a `git archive` of `8f35b60` | **781 passed** (more than my 730 because it includes the repository-level Docker tests that my test image skips) |
 | Real systemd | Step 18 run (separate document) | DNS fix, rollback, restart fix, report, permissions all worked |
 
 ## 4. What failed (the findings)
@@ -121,7 +128,17 @@ the engine reports "failed", then rolls back and **reverts the working fix**
 (c) `resolvectl revert <link>` resets the link to its defaults. It does not restore
 what was there before. The second reviewer reports that on real systemd-resolved a
 forced failure **cleared a pre-existing per-link DNS server and search domain** and
-the CLI still said "rolled back". I did not reproduce (c). *Fix:* snapshot the state
+the CLI still said "rolled back". **(c) is reproduced by me on real systemd** (systemd as PID 1, systemd-resolved,
+`resolvectl`): `eth0` had DNS `192.0.2.1` and search domain `corp.invalid`; I
+blackholed those and both repair targets; the dry run raised **no warning** about the
+existing settings; the apply ended `FAILED ... rolled back`; afterwards `resolvectl
+dns eth0` and `resolvectl domain eth0` were **both empty**. It is also reproduced
+independently in `TestingDoneByCodex.md` (section "Confirmed failure
+restoring existing per-link DNS settings"): a pre-existing runtime DNS server
+`192.0.2.1` and search domain `corp.invalid` were both empty afterwards, and the run
+reported "rolled back". The same report adds that the DNS precheck never establishes
+that systemd-resolved actually *owns* the `127.0.0.53` stub, only that one loopback
+nameserver is listed. *Fix:* snapshot the state
 before the change and restore it; run the rollback only for steps that actually
 ran and only if the check does not pass; refuse the fix when the link already has
 DNS servers or domains.
@@ -150,8 +167,11 @@ not be verified.
 
 **F-08. An empty rule directory is an all-clear.** *Second reviewer. Reproduced.*
 `load_rules_dir` on an empty directory returns `[]`; the diagnosis then has 0 checks
-and would exit 0. A broken installation looks healthy. *Fix:* an empty default rule
-set, or a directory or decoding error, is a tool error (exit 2).
+and would exit 0. A broken installation looks healthy. The second reviewer adds that
+directory and decoding errors (`OSError`, `UnicodeDecodeError`) also escape the CLI,
+which only catches `RuleFileError`; I confirmed that by reading the loader and CLI,
+not by running it. *Fix:* an empty default rule set, or a directory or decoding
+error, is a tool error (exit 2).
 
 **F-09. "Docker daemon is not running" is observed but no rule reports it.**
 *Second reviewer. Reproduced.* `docker.daemon_running = False [ok]` exists, no
@@ -190,21 +210,29 @@ characters are escaped later, so this is not a leak, but it is unbounded.
 *Fix:* apply the same length and control-character check to every report field.
 
 **F-14. Docker's root directory (and other raw strings) is exported as a normal fact.**
-*Second reviewer. Not reproduced by me.* `docker.root_dir` is a shareable fact value
+*Second reviewer. **Reproduced by me:** a Docker root of
+`/srv/acme-corp-customer-42/docker` appeared in `diagnose --json` and in both report
+files (JSON and Markdown).* `docker.root_dir` is a shareable fact value
 and appears in `diagnose --json` without redaction. A custom path segment (a
 customer label) is not matched by the redaction patterns. *Fix:* define exportable
 values per fact key and purpose; keep capacity and filesystem type, not the path.
 
 **F-15. Storage does not verify who owns existing directories and files.**
-*Second reviewer. Not reproduced by me.* The report directory check rejects
+*Second reviewer. **Reproduced by me on Linux, as root:** a report directory owned
+by uid 12345 (mode 0755), a lock file owned by uid 12345 (mode 0666), and an action
+log owned by uid 12345 (mode 0666) were all accepted, and the tool appended to the
+log without changing its owner or mode.* The report directory check rejects
 group/world-writable directories but accepts one owned by another user. The lock
 and log files are accepted without checking owner or mode. *Fix:* validate owner and
 mode on POSIX, and create files relative to the validated directory.
 
 **F-16. Report writing can leave a single file behind on a sync failure.**
-*Second reviewer. Not reproduced by me.* If the Markdown `fsync` fails after the
-file is created, a lone `.md` can remain. *Fix:* clean up each file if its own write
-or sync fails.
+*Second reviewer. **Reproduced by me:** a failed sync of the second file left a lone
+`.md`, and a failed sync of the first file left the `.json`.* If the Markdown `fsync` fails after the
+file is created, a lone `.md` can remain. They also point out that `create_private_file`
+does a single `os.write`, so a short write is not handled (I confirmed that by
+reading it). *Fix:* clean up each file if its own write or sync fails, and loop
+until all bytes are written.
 
 ### 4.3 Low
 
@@ -220,11 +248,12 @@ or sync fails.
 | F-24 | **Collectors can raise on hostile input.** A drive name over about 90 characters makes a fact key invalid (`ValidationError`); a CSV field over 131,072 characters raises `csv.Error`. 6 crashes in my 150 hostile hosts. In production `run_collectors` turns this into one error fact, so the result is safe but all of that collector's facts are lost. | Mine. Reproduced. |
 | F-25 | **`df` path operand allows `..`.** `/dev/../etc/passwd` is accepted. Harmless (`df` is read-only and the collector validates its own input), but the pattern should reject it. | Mine. Reproduced. |
 | F-26 | **Read-only root filesystem makes a critical finding in the container.** A Compose container with a read-only root gets `disk.root_not_writable` critical and exit 1. The environment banner helps humans; automation still sees a failure. | Second reviewer. I saw the finding myself in step 17; not re-tested here. |
-| F-27 | **The Step 18 script does not fail when a check fails.** `vm()` returns the status of its logging, and several probes pipe into `head`, so a failed repair can still end with exit 0. | Second reviewer. I confirm it by reading my own script. Not run. |
+| F-27 | **The Step 18 script does not fail when a check fails.** `vm()` returns the status of its logging, and several probes pipe into `head`, so a failed repair can still end with exit 0. It also **force-removes a fixed container name (`vast-e2e`) at startup**, which would delete an unrelated container that happens to have that name. | Second reviewer. I confirm both by reading my own script. Not run. |
 | F-28 | **README still says "Design phase. No working code yet."** | My smoke test. Confirmed. |
 | F-29 | **PLAN.md's status table still shows Level 1 "Draft" and Levels 2 and 3 "Outline".** | My smoke test. Confirmed. |
 | F-30 | **`pyproject.toml` description is still "Add your description here".** | Second reviewer. Reproduced. |
 | F-31 | **`.coverage` is not in `.gitignore`.** My coverage run created one (I deleted it). | Mine. |
+| F-32 | **The e2e test machine bind-mounts the host cgroup tree read-write.** `e2e/run_poc.sh` uses `--cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw` together with `SYS_ADMIN`, unconfined seccomp, and unconfined AppArmor. I described it as "not `--privileged`", which is true but understates it: a writable view of the Docker Desktop VM's cgroups plus `SYS_ADMIN` is a large permission. The second reviewer booted systemd in a **private cgroup namespace** with a writable cgroup filesystem created *inside* the container, with no host cgroup mounted. That is the safer way and should replace mine. | Second reviewer (their run). I confirm my script's flags by reading it. I did not try the private-cgroup boot. |
 
 ## 5. Mistakes and noise in my own testing (reported, not hidden)
 
@@ -271,9 +300,13 @@ kinds of errors that have recurred.
   log format, how a rental looks) is still unknown.
 - **No NVIDIA GPU, no real SMART, no real kernel log** in any run.
 - **No `amd64` run.** All Linux runs were `arm64`.
-- **A real `sudo` was never run.** F-07 is a simulation of a denied kill.
-- **F-05(c), F-14, F-15, F-16, F-26, F-27** were reported by the second reviewer and
-  are not reproduced by me.
+- **A real `sudo` timeout was never run by me.** F-07 is a simulation of a denied
+  kill. (The second reviewer ran one allowed `sudo -n` read, but not a timeout under
+  `sudo`.)
+- **F-26, F-27, and F-32** come from the second reviewer and were not run by me:
+  F-26 I saw in step 17; F-27 I confirmed by reading my script and by my own run
+  records (the script exited 0 while recording non-zero command exits); F-32 I did not
+  try the private-cgroup boot. Everything else they reported I reproduced.
 - **No mutation testing, no property-based testing library, no load or concurrency
   stress** beyond the unit tests.
 - **The Markdown was never viewed in a renderer** (GitHub, VS Code).
@@ -316,3 +349,42 @@ uv run --with coverage coverage run --source=src -m pytest -q ; uv run --with co
 The adversarial scripts (`fuzz.py`, `redos.py`, `scale.py`, `report_long.py`,
 `verify_review.py`, `verify_codex.py`, `verify_linux.py`, `smoke.sh`) are in my
 scratch folder. They are not part of the repository yet.
+
+## 10. Cross-check of the two reports by the second reviewer
+
+I read `CodeReviewByCodex.md` and `TestingDoneByCodex.md` in full (neither contains
+secrets; the addresses in them are documentation ranges). Result of checking them
+against this file:
+
+| Their item | Where it is here | Notes |
+|---|---|---|
+| Log write fails after mutation (P1) | F-06 | Same finding. Reproduced by me. |
+| Preview and apply can target different things (P1) | F-04 | Reproduced by me at engine level. |
+| DNS demo accepts existing settings and erases them (P1) | F-05(c) | **Reproduced by them and by me on real systemd.** I added the "resolved may not own the stub" point. |
+| Identifiers retained from arbitrary host strings (P1) | F-14 | Reproduced by me (`diagnose --json` and both report files). |
+| One readable drive passes SMART for unreadable ones (P2) | F-01 | Reproduced by me. |
+| Truncated kernel log passes Xid 79 (P2) | F-02 | Reproduced by me. |
+| Docker daemon outage has no finding (P2) | F-09 | Reproduced by me. |
+| Launch failure reported as driver failure (P2) | F-10 | Reproduced by me. |
+| Empty rule directory is an all-clear (P2) | F-08 | Reproduced by me. I added their decoding/I-O point from reading the code. |
+| Timeout can wait forever (P2) | F-07 | Reproduced by me on Linux by simulation. |
+| Report writes can leave one file (P2) | F-16 | Reproduced by me (both orders). I added the short-write point from reading the code. |
+| No ownership checks on existing paths (P2) | F-15 | Reproduced by me on Linux as root (directory, lock file, action log). |
+| Step 18 script records failures without failing (P2) | F-27 | Confirmed by reading my script. I added the fixed-container-name point. |
+| Container read-only root makes a critical finding | F-26 | Seen by me in step 17. |
+| Stale README and package metadata | F-28, F-30 | Reproduced by me. |
+| Private cgroup namespace for the e2e machine | **F-32 (new)** | I had missed that my script mounts the host cgroup tree read-write. |
+
+**What they found that I would have missed on my own:** F-04, F-05(c) on real
+systemd, F-14, F-15, F-16, F-32. **What I found that is not in their reports:**
+F-03, F-11, F-12, F-13, F-17, F-18, F-19, F-20, F-21, F-23, F-24, F-25, F-22. The
+two reviews overlap on F-01, F-02, F-06, F-07, F-08, and the stale docs, which is
+reassuring: independent reviewers converged on them.
+
+Environment notes from their testing, not defects: on a Windows bind mount, `ruff`
+reports 25 `EXE002` errors because files look executable (git records them as
+non-executable); a temporary Windows test directory needed `--basetemp`; an
+offline wheel install could not resolve `pydantic` without a registry. None is a
+project bug. A Linux-only CI job from a full checkout is still needed, because the
+Compose test image skips the repository-level Docker tests by design.
+
