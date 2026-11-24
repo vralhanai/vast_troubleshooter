@@ -352,7 +352,11 @@ def fix(
                 typer.echo("Not confirmed. Nothing was changed.")
                 raise typer.Exit(1)
             outcome = engine.run(
-                fix_id, apply=True, confirmation=typed, allow_demo=demo_disposable_host
+                fix_id,
+                apply=True,
+                confirmation=typed,
+                allow_demo=demo_disposable_host,
+                expected_commands=outcome.commands,
             )
             console.print()
             render_fix(outcome, console)

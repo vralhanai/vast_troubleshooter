@@ -129,7 +129,11 @@ def test_a_real_lspci_with_no_nvidia_hardware_is_a_count_of_zero() -> None:
 
 def test_the_real_default_route_line_gives_the_link() -> None:
     ctx = fake_context(
-        results={"dns.default_route": ok("dns.default_route", "ip_route_default.txt")}
+        results={
+            "dns.default_route": ok("dns.default_route", "ip_route_default.txt"),
+            "dns.link_servers": "Link 2 (eth0):\n",
+            "dns.link_domains": "Link 2 (eth0):\n",
+        }
     )
     assert dict(_default_link(ctx) or {}) == {
         "link": "eth0"

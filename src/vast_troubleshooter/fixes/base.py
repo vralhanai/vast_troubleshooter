@@ -20,6 +20,12 @@ _FIX_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,59}")
 # Returns None if it is safe to go on, or the reason it is not. Reviewed code
 # reading facts: it can only refuse, never approve something the engine refused.
 Precheck = Callable[[Mapping[str, Fact]], str | None]
+
+
+class OperandsUnavailable(Exception):
+    """The target cannot be decided, or acting on it would not be safe. Says why."""
+
+
 # Works out the one target a fix acts on (for example the network link) from the
 # host itself. None means it could not be decided, so the fix does not run.
 OperandSource = Callable[[HostContext], Mapping[str, str] | None]

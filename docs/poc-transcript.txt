@@ -1,4 +1,4 @@
-POC end-to-end test, started 2026-11-23T23:31:50Z
+POC end-to-end test, started 2026-11-24T00:19:05Z
 Test machine: a container running systemd as PID 1 (image vast-troubleshooter:e2e), root user.
 
 ### 0. Boot the test machine
@@ -31,16 +31,16 @@ vast.ai -> 76.76.21.21
 $ vast-troubleshooter diagnose | head -12
 Vast Troubleshooter diagnosis
 Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
-15 checks: 0 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
+16 checks: 1 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
 Rental state: unknown (disruptive fixes are blocked)
 
-No problems found in the checks that ran.
+CRITICAL The Docker daemon is not running (offline)
+  evidence: docker.daemon_running = False [ok]
+  what to do: Vast starts every rental through Docker, so a stopped daemon keeps the host from working. Check 'systemctl status docker' and 'journalctl -u docker' for why it stopped, then start it. Wait until no rentals are active before restarting anything.
+
 Could not be checked (8):
   The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
   An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
-  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
-  Docker is running but the NVIDIA runtime is not registered (critical): docker.nvidia_runtime_present: error
-  CUDA version is below the Vast minimum (11.8) (critical): driver.cuda_version_code: no data
 [exit 0]
 
 ### 2. Capture real systemd output as fixtures (active, inactive, auto-restart, failed, not found)
@@ -96,8 +96,12 @@ RESOLUTION FAILED after 0.0s: [Errno -3] Temporary failure in name resolution
 $ vast-troubleshooter diagnose | head -16
 Vast Troubleshooter diagnosis
 Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
-15 checks: 1 problem(s), 5 ok, 8 could not be checked, 1 not applicable.
+16 checks: 2 problem(s), 5 ok, 8 could not be checked, 1 not applicable.
 Rental state: unknown (disruptive fixes are blocked)
+
+CRITICAL The Docker daemon is not running (offline)
+  evidence: docker.daemon_running = False [ok]
+  what to do: Vast starts every rental through Docker, so a stopped daemon keeps the host from working. Check 'systemctl status docker' and 'journalctl -u docker' for why it stopped, then start it. Wait until no rentals are active before restarting anything.
 
 CRITICAL DNS cannot resolve vast.ai (offline)
   evidence: network.dns_vast_ai_resolves = False [ok]
@@ -106,13 +110,9 @@ CRITICAL DNS cannot resolve vast.ai (offline)
 Could not be checked (8):
   The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
   An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
-  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
-  Docker is running but the NVIDIA runtime is not registered (critical): docker.nvidia_runtime_present: error
-  CUDA version is below the Vast minimum (11.8) (critical): driver.cuda_version_code: no data
-  nvidia-smi is failing or hanging (critical): driver.nvidia_smi_responding: missing
 [exit 0]
 $ vast-troubleshooter diagnose --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('exit_code', d['exit_code'], 'findings', [f['rule_id'] for f in d['findings']])"
-exit_code 1 findings ['network.dns_vast_ai_unresolvable']
+exit_code 1 findings ['docker.daemon_not_running', 'network.dns_vast_ai_unresolvable']
 [exit 0]
 
 ### 5. The DNS fix is demo only: refused without the demo flag
@@ -251,17 +251,17 @@ vast.ai -> 76.76.21.21
 $ vast-troubleshooter diagnose | head -10
 Vast Troubleshooter diagnosis
 Environment: container on a WSL2 kernel. These results describe this environment, not a Vast host. The kernel log, drives, systemd, GPUs, and rentals seen here are not representative.
-15 checks: 0 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
+16 checks: 1 problem(s), 6 ok, 8 could not be checked, 1 not applicable.
 Rental state: unknown (disruptive fixes are blocked)
 
-No problems found in the checks that ran.
+CRITICAL The Docker daemon is not running (offline)
+  evidence: docker.daemon_running = False [ok]
+  what to do: Vast starts every rental through Docker, so a stopped daemon keeps the host from working. Check 'systemctl status docker' and 'journalctl -u docker' for why it stopped, then start it. Wait until no rentals are active before restarting anything.
+
 Could not be checked (8):
-  The Docker storage drive is smaller than 200 GB (critical): disk.docker_dir_total_bytes: missing
-  An NVMe drive reports a critical warning or media errors (critical): disk.nvme_critical_warning_count: no data, disk.nvme_media_errors_total: no data
-  A drive reports a failed SMART health assessment (critical): disk.smart_failed_count: no data
 [exit 0]
 $ vast-troubleshooter diagnose --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('exit_code', d['exit_code'], 'findings', [f['rule_id'] for f in d['findings']])"
-exit_code 3 findings []
+exit_code 1 findings ['docker.daemon_not_running']
 [exit 0]
 
 ### 11. Undo by hand: resolvectl revert eth0 (what the fix's undo notes say)
@@ -370,20 +370,20 @@ BLOCKED restart-vast-daemon
 ### 15. Report: written on real Linux, then checked for leaks
 $ vast-troubleshooter report --output-dir /reports
 Report written. Nothing was uploaded. Read both files before you share them:
-  /reports/report-20261123T233244Z.json  (29603 bytes)
-  /reports/report-20261123T233244Z.md  (8205 bytes)
-Diagnosis: 1 problem(s), 8 could not be checked (incomplete).
+  /reports/report-20261124T001959Z.json  (30954 bytes)
+  /reports/report-20261124T001959Z.md  (8617 bytes)
+Diagnosis: 2 problem(s), 8 could not be checked (incomplete).
 [exit 0]
 $ ls -la /reports
 total 52
-drwxr-xr-x 1 root root  4096 Nov 23 23:32 .
-drwxr-xr-x 1 root root  4096 Nov 23 23:31 ..
--rw------- 1 root root 29603 Nov 23 23:32 report-20261123T233244Z.json
--rw------- 1 root root  8205 Nov 23 23:32 report-20261123T233244Z.md
+drwxr-xr-x 1 root root  4096 Nov 24 00:19 .
+drwxr-xr-x 1 root root  4096 Nov 24 00:19 ..
+-rw------- 1 root root 30954 Nov 24 00:19 report-20261124T001959Z.json
+-rw------- 1 root root  8617 Nov 24 00:19 report-20261124T001959Z.md
 [exit 0]
 $ grep -c -i -E 'poc-machine|172\.17\.0\.|192\.168\.65\.|root@' /reports/*.json /reports/*.md; true
-/reports/report-20261123T233244Z.json:0
-/reports/report-20261123T233244Z.md:0
+/reports/report-20261124T001959Z.json:0
+/reports/report-20261124T001959Z.md:0
 [exit 0]
 $ grep -o -h -E '1\.1\.1\.1|8\.8\.8\.8' /reports/*.json /reports/*.md | sort | uniq -c
       5 1.1.1.1
@@ -402,39 +402,39 @@ $ grep -c -E 'raw_excerpt|source_command' /reports/*.json; true
 ### 16. Action log and file permissions
 $ ls -la /var/lib/vast-troubleshooter
 total 24
-drwx------ 2 root root 4096 Nov 23 23:32 .
-drwxr-xr-x 1 root root 4096 Nov 23 23:32 ..
--rw------- 1 root root 8441 Nov 23 23:32 actions.jsonl
--rw------- 1 root root    0 Nov 23 23:32 fix.lock
+drwx------ 2 root root 4096 Nov 24 00:19 .
+drwxr-xr-x 1 root root 4096 Nov 24 00:19 ..
+-rw------- 1 root root 8519 Nov 24 00:19 actions.jsonl
+-rw------- 1 root root    0 Nov 24 00:19 fix.lock
 [exit 0]
 $ python3 -c "import json; [print(json.dumps({k:v for k,v in json.loads(l).items() if k in ('time','run_id','fix_id','phase','status','block_code')}, sort_keys=True)) for l in open('/var/lib/vast-troubleshooter/actions.jsonl')]" | tail -25
-{"block_code": "demo_only", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "5731f3355ed1", "status": "blocked", "time": "2026-11-23T23:32:08+00:00"}
-{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "ed9e5a910d15", "status": "blocked", "time": "2026-11-23T23:32:09+00:00"}
-{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "f401b2031b86", "status": "blocked", "time": "2026-11-23T23:32:10+00:00"}
-{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "54c9a892b5d0", "status": "blocked", "time": "2026-11-23T23:32:11+00:00"}
-{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "17872327ce2f", "status": "blocked", "time": "2026-11-23T23:32:12+00:00"}
-{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "7bf0d1684933", "status": "blocked", "time": "2026-11-23T23:32:13+00:00"}
-{"block_code": "", "fix_id": "fix-dns-resolver", "phase": "dry_run", "run_id": "2349768a4af0", "status": "dry_run", "time": "2026-11-23T23:32:14+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "cf5a1cc9a90d", "time": "2026-11-23T23:32:14+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "cf5a1cc9a90d", "status": "ok", "time": "2026-11-23T23:32:14+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "cf5a1cc9a90d", "status": "ok", "time": "2026-11-23T23:32:14+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "cf5a1cc9a90d", "status": "succeeded", "time": "2026-11-23T23:32:16+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "2d8d9d7e9da3", "time": "2026-11-23T23:32:20+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:20+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:20+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:27+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "2d8d9d7e9da3", "status": "ok", "time": "2026-11-23T23:32:27+00:00"}
-{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "2d8d9d7e9da3", "status": "failed", "time": "2026-11-23T23:32:27+00:00"}
-{"block_code": "precondition_failed", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "7d6e8cc006db", "status": "blocked", "time": "2026-11-23T23:32:29+00:00"}
-{"block_code": "rental_unknown", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "320464858d97", "status": "blocked", "time": "2026-11-23T23:32:31+00:00"}
-{"block_code": "", "fix_id": "restart-vast-daemon", "phase": "dry_run", "run_id": "3e17e2da1556", "status": "dry_run", "time": "2026-11-23T23:32:31+00:00"}
-{"fix_id": "restart-vast-daemon", "phase": "apply_started", "run_id": "876fbd17d1fa", "time": "2026-11-23T23:32:32+00:00"}
-{"fix_id": "restart-vast-daemon", "phase": "command", "run_id": "876fbd17d1fa", "status": "ok", "time": "2026-11-23T23:32:32+00:00"}
-{"fix_id": "restart-vast-daemon", "phase": "apply_finished", "run_id": "876fbd17d1fa", "status": "succeeded", "time": "2026-11-23T23:32:42+00:00"}
-{"block_code": "no_problem", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "504cab619d41", "status": "blocked", "time": "2026-11-23T23:32:43+00:00"}
+{"block_code": "demo_only", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "e304bca58cbf", "status": "blocked", "time": "2026-11-24T00:19:24+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "e1e3d8b79e1b", "status": "blocked", "time": "2026-11-24T00:19:25+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "9cf20cf212a8", "status": "blocked", "time": "2026-11-24T00:19:25+00:00"}
+{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "6a39a3f6bccf", "status": "blocked", "time": "2026-11-24T00:19:26+00:00"}
+{"block_code": "rental_unknown", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "383595227cef", "status": "blocked", "time": "2026-11-24T00:19:28+00:00"}
+{"block_code": "rental_active", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "0332c8f18c37", "status": "blocked", "time": "2026-11-24T00:19:28+00:00"}
+{"block_code": "", "fix_id": "fix-dns-resolver", "phase": "dry_run", "run_id": "0f699ca06545", "status": "dry_run", "time": "2026-11-24T00:19:29+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "11f081737c63", "time": "2026-11-24T00:19:30+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "11f081737c63", "status": "ok", "time": "2026-11-24T00:19:30+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "11f081737c63", "status": "ok", "time": "2026-11-24T00:19:30+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "11f081737c63", "status": "succeeded", "time": "2026-11-24T00:19:32+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_started", "run_id": "684b35fa62f1", "time": "2026-11-24T00:19:36+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "684b35fa62f1", "status": "ok", "time": "2026-11-24T00:19:36+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "command", "run_id": "684b35fa62f1", "status": "ok", "time": "2026-11-24T00:19:36+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "684b35fa62f1", "status": "ok", "time": "2026-11-24T00:19:43+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "rollback", "run_id": "684b35fa62f1", "status": "ok", "time": "2026-11-24T00:19:43+00:00"}
+{"fix_id": "fix-dns-resolver", "phase": "apply_finished", "run_id": "684b35fa62f1", "status": "failed", "time": "2026-11-24T00:19:43+00:00"}
+{"block_code": "precondition_failed", "fix_id": "fix-dns-resolver", "phase": "blocked", "run_id": "59e13af41d87", "status": "blocked", "time": "2026-11-24T00:19:45+00:00"}
+{"block_code": "rental_unknown", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "28f40b2ac098", "status": "blocked", "time": "2026-11-24T00:19:46+00:00"}
+{"block_code": "", "fix_id": "restart-vast-daemon", "phase": "dry_run", "run_id": "17a299c2c4f9", "status": "dry_run", "time": "2026-11-24T00:19:47+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "apply_started", "run_id": "41abc666c091", "time": "2026-11-24T00:19:48+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "command", "run_id": "41abc666c091", "status": "ok", "time": "2026-11-24T00:19:48+00:00"}
+{"fix_id": "restart-vast-daemon", "phase": "apply_finished", "run_id": "41abc666c091", "status": "succeeded", "time": "2026-11-24T00:19:58+00:00"}
+{"block_code": "no_problem", "fix_id": "restart-vast-daemon", "phase": "blocked", "run_id": "86f62cecb182", "status": "blocked", "time": "2026-11-24T00:19:59+00:00"}
 [exit 0]
 $ grep -c -i -E 'stdout|stderr|password|token' /var/lib/vast-troubleshooter/actions.jsonl; true
 0
 [exit 0]
 
-Finished 2026-11-23T23:32:48Z
+Finished 2026-11-24T00:20:04Z

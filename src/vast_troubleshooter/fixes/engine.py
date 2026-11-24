@@ -24,6 +24,7 @@ restart does not exist: an interrupted workload cannot be restored.
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from vast_troubleshooter.fixes.base import (
     FixOutcome,
     FixStatus,
     FixStep,
+    OperandsUnavailable,
     PlanningRunner,
 )
 from vast_troubleshooter.fixes.storage import (
@@ -84,6 +86,7 @@ class FixEngine:
         self._observe = observe or self._observe_real
         self._clock = clock
         self._sleep = sleep
+        self._log_failures = 0
 
     # -- observation ----------------------------------------------------------
 
@@ -113,7 +116,12 @@ class FixEngine:
         apply: bool = False,
         confirmation: str | None = None,
         allow_demo: bool = False,
+        expected_commands: Sequence[Sequence[str]] | None = None,
     ) -> FixOutcome:
+        """`expected_commands` is what the operator was shown in the dry run. If
+        the commands now differ (for example another network link was picked), the
+        run is blocked rather than applying something the operator never saw."""
+        self._log_failures = 0
         run_id = uuid.uuid4().hex[:12]
         fix = self._fixes.get(fix_id)
         if fix is None:
@@ -130,7 +138,12 @@ class FixEngine:
 
         operands: Mapping[str, str] = {}
         if fix.operand_source is not None:
-            found = fix.operand_source(self._ctx)
+            try:
+                found = fix.operand_source(self._ctx)
+            except OperandsUnavailable as exc:
+                return self._blocked(
+                    run_id, fix, fix_id, "operands_unavailable", str(exc)
+                )
             if not found:
                 return self._blocked(
                     run_id,
@@ -179,6 +192,19 @@ class FixEngine:
             )
 
         commands = tuple(tuple(argv) for argv in plans)
+        if expected_commands is not None and commands != tuple(
+            tuple(c) for c in expected_commands
+        ):
+            return self._blocked(
+                run_id,
+                fix,
+                fix_id,
+                "target_changed",
+                "the commands differ from the ones that were shown to you; "
+                "nothing was changed. Run the dry run again.",
+                rental,
+                before,
+            )
         if not apply:
             outcome = self._outcome(
                 FixStatus.DRY_RUN, run_id, fix, commands, rental=rental, before=before
@@ -316,7 +342,7 @@ class FixEngine:
                 before,
             )
 
-        failed, timed_out = self._run_steps(
+        failed, timed_out, may_have_changed = self._run_steps(
             run_id, fix, fix.commands, operands, "command"
         )
         if fix.settle_seconds:
@@ -326,8 +352,16 @@ class FixEngine:
 
         rolled_back = False
         rollback_failed = False
-        if status is not FixStatus.SUCCEEDED and fix.rollback:
-            undo_failure, _ = self._run_steps(
+        # Roll back only when it can help: something may have changed, and the
+        # problem is not already solved (undoing a working fix because a later
+        # step misreported would be worse than leaving it).
+        if (
+            status is not FixStatus.SUCCEEDED
+            and fix.rollback
+            and may_have_changed
+            and after != CheckStatus.PASS.value
+        ):
+            undo_failure, _, _ = self._run_steps(
                 run_id, fix, fix.rollback, operands, "rollback"
             )
             if undo_failure:
@@ -354,7 +388,16 @@ class FixEngine:
             rolled_back=rolled_back,
             rollback_failed=rollback_failed,
         )
-        self._log.write(
+        if self._log_failures:
+            reasons = (
+                *reasons,
+                (
+                    "THE ACTION LOG COULD NOT BE WRITTEN: this run is not fully "
+                    "recorded. Check the system by hand."
+                ),
+            )
+            outcome = replace(outcome, reasons=reasons)
+        self._write(
             {
                 "run_id": run_id,
                 "fix_id": fix.id,
@@ -377,12 +420,17 @@ class FixEngine:
         steps: Sequence[FixStep],
         operands: Mapping[str, str],
         phase: str,
-    ) -> tuple[str, bool]:
-        """Run steps in order; stop at the first failure. Returns (failure, timed_out)."""
+    ) -> tuple[str, bool, bool]:
+        """Run steps in order; stop at the first failure.
+
+        Returns (failure, timed_out, may_have_changed). A step that succeeded or
+        timed out may have changed the system; one that failed outright or never
+        started is treated as not having changed it."""
+        changed = False
         for step in steps:
             given = {name: operands[name] for name in step.operands}
             result = self._runner.run(step.op_id, **given)
-            self._log.write(
+            self._write(
                 {
                     "run_id": run_id,
                     "fix_id": fix.id,
@@ -393,10 +441,11 @@ class FixEngine:
                 }
             )
             if result.status is CommandStatus.TIMEOUT:
-                return f"{step.op_id} timed out", True
+                return f"{step.op_id} timed out", True, True
             if not result.ok:
-                return f"{step.op_id} failed ({result.status.value})", False
-        return "", False
+                return f"{step.op_id} failed ({result.status.value})", False, changed
+            changed = True
+        return "", False, changed
 
     @staticmethod
     def _judge(
@@ -488,6 +537,13 @@ class FixEngine:
         )
         self._safe_log(outcome, "blocked")
         return outcome
+
+    def _write(self, record: dict[str, object]) -> None:
+        """Log after the change has started. A failure here must not hide the outcome."""
+        try:
+            self._log.write(record)
+        except OSError:
+            self._log_failures += 1
 
     def _safe_log(self, outcome: FixOutcome, phase: str) -> None:
         """Blocked and dry runs change nothing, so a log failure must not hide them."""

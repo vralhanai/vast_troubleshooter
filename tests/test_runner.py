@@ -311,3 +311,17 @@ def test_denied_permission_on_start_is_an_error(
     result = make_runner(py_op("t.ok", "print(1)")).run("t.ok")
     assert result.status is CommandStatus.ERROR
     assert "denied" in result.detail
+
+
+def test_a_command_that_cannot_be_killed_does_not_hang_the_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-07: a refused kill (root process under sudo) used to block `proc.wait()` forever."""
+    monkeypatch.setattr(runner_module, "_kill_tree", lambda proc: None)
+    monkeypatch.setattr(runner_module, "_KILL_GRACE", 0.5)
+    r = make_runner(py_op("t.stuck", "import time; time.sleep(8)", timeout=0.3))
+    start = time.monotonic()
+    result = r.run("t.stuck")
+    assert time.monotonic() - start < 4  # returned; did not wait the full 8 seconds
+    assert result.status is CommandStatus.TIMEOUT
+    assert "could not be stopped" in result.detail

@@ -111,6 +111,10 @@ def _is_root() -> bool:
     return geteuid is not None and geteuid() == 0
 
 
+# Seconds to wait for a killed command to exit before giving up on it.
+_KILL_GRACE = 5.0
+
+
 class _Capture:
     """Drain a pipe on a thread, keeping at most `limit` bytes."""
 
@@ -246,14 +250,21 @@ class SubprocessRunner:
         out = _Capture(proc.stdout, op.max_output)
         err = _Capture(proc.stderr, op.max_output)
         timed_out = False
+        still_running = False
         try:
             proc.wait(timeout=op.timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             _kill_tree(proc)
-            proc.wait()
+            try:
+                proc.wait(timeout=_KILL_GRACE)
+            except subprocess.TimeoutExpired:
+                # The kill was refused (for example a process running as root
+                # under sudo). Never wait for it forever: report it clearly.
+                still_running = True
 
-        stdout, stderr = out.finish(), err.finish()
+        drain = 0.2 if still_running else 2.0  # its pipes stay open while it runs
+        stdout, stderr = out.finish(drain), err.finish(drain)
         duration = time.monotonic() - start
         truncated = out.truncated or err.truncated
         base = {
@@ -266,9 +277,14 @@ class SubprocessRunner:
             "duration": duration,
         }
         if timed_out:
+            note = (
+                "; it could not be stopped and may still be running"
+                if still_running
+                else ""
+            )
             return CommandResult(
                 status=CommandStatus.TIMEOUT,
-                detail=f"timed out after {op.timeout}s",
+                detail=f"timed out after {op.timeout}s{note}",
                 **base,  # type: ignore[arg-type]
             )
         if proc.returncode != 0:

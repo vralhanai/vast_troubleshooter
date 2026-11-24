@@ -14,6 +14,7 @@ from vast_troubleshooter.fixes import (
     FixStatus,
     default_fix_engine,
 )
+from vast_troubleshooter.fixes.base import OperandsUnavailable
 from vast_troubleshooter.fixes.definitions import (
     FIX_DNS_RESOLVER,
     LINK,
@@ -234,12 +235,20 @@ def test_dns_precheck_refuses_when_it_cannot_tell() -> None:
 # -- the target of the DNS fix ----------------------------------------------------------------------------
 
 
+# What `resolvectl dns/domain <link>` print for a link with no settings of its own.
+CLEAN_LINK = {
+    "dns.link_servers": "Link 2 (ens3):\n",
+    "dns.link_domains": "Link 2 (ens3):\n",
+}
+
+
 def route_ctx(text: str, status: CommandStatus = CommandStatus.OK) -> HostContext:
     return fake_context(
         results={
+            **CLEAN_LINK,
             "dns.default_route": CommandResult(
                 "dns.default_route", status, returncode=0, stdout=text
-            )
+            ),
         }
     )
 
@@ -448,6 +457,7 @@ def dns_engine(
         results={
             "network.resolved_active": ok("network.resolved_active", "active\n"),
             "dns.default_route": ok("dns.default_route", route),
+            **CLEAN_LINK,
         },
         files={"/etc/resolv.conf": nameservers},
         network=net,
@@ -567,3 +577,53 @@ def test_a_read_runner_is_never_given_to_the_fix_engine() -> None:
         FakeRunner({}), "plan"
     )
     assert FakeFiles({}).read_text.__name__ == "read_text"
+
+
+# -- the DNS fix never replaces settings it could not restore (F-05c) -----------------------------
+
+
+def _link_ctx(servers: str, domains: str = "Link 2 (ens3):\n") -> HostContext:
+    return fake_context(
+        results={
+            "dns.default_route": ok("dns.default_route", ROUTE),
+            "dns.link_servers": servers,
+            "dns.link_domains": domains,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("servers", "domains"),
+    [
+        ("Link 2 (ens3): 192.0.2.1\n", "Link 2 (ens3):\n"),  # its own server
+        ("Link 2 (ens3):\n", "Link 2 (ens3): corp.invalid\n"),  # its own search domain
+        ("Link 2 (ens3):\n", "Link 2 (ens3): ~.\n"),  # a routing domain
+        (
+            "garbage with no colon\n",
+            "Link 2 (ens3):\n",
+        ),  # unparseable: assume the worst
+    ],
+)
+def test_a_link_with_its_own_dns_settings_is_left_to_the_operator(
+    servers: str, domains: str
+) -> None:
+    with pytest.raises(OperandsUnavailable):
+        _default_link(_link_ctx(servers, domains))
+
+
+def test_a_link_whose_settings_cannot_be_read_is_left_to_the_operator() -> None:
+    ctx = fake_context(
+        results={
+            "dns.default_route": ok("dns.default_route", ROUTE),
+            "dns.link_servers": CommandResult(
+                "dns.link_servers", CommandStatus.ERROR, returncode=1
+            ),
+            "dns.link_domains": "Link 2 (ens3):\n",
+        }
+    )
+    with pytest.raises(OperandsUnavailable, match="cannot read"):
+        _default_link(ctx)
+
+
+def test_a_link_with_no_settings_of_its_own_is_accepted() -> None:
+    assert dict(_default_link(_link_ctx("Link 2 (ens3):\n")) or {}) == {"link": "ens3"}

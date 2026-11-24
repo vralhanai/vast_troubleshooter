@@ -229,7 +229,7 @@ def test_rollback_also_runs_when_a_command_fails(tmp_path: Path) -> None:
     runner = FakeMutationRunner(
         {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
         results={
-            "t.step1": CommandResult("t.step1", CommandStatus.ERROR, returncode=1)
+            "t.step2": CommandResult("t.step2", CommandStatus.ERROR, returncode=1)
         },
     )
     engine, runner, _, _ = build(
@@ -237,7 +237,26 @@ def test_rollback_also_runs_when_a_command_fails(tmp_path: Path) -> None:
     )
     outcome = engine.run("variant-fix", **CONFIRM)
     assert outcome.status is FixStatus.FAILED and outcome.rolled_back
-    assert runner.run_calls == ["t.step1", "t.undo"]  # step 2 skipped, undo ran
+    # step 1 changed something, step 2 failed, so the undo ran
+    assert runner.run_calls == ["t.step1", "t.step2", "t.undo"]
+
+
+def test_no_rollback_when_the_first_command_failed_and_nothing_changed(
+    tmp_path: Path,
+) -> None:
+    runner = FakeMutationRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
+        results={
+            "t.step1": CommandResult("t.step1", CommandStatus.ERROR, returncode=1)
+        },
+    )
+    engine, runner, _, _ = build(
+        tmp_path, variant(rollback=(FixStep("t.undo"),)), runner=runner
+    )
+    outcome = engine.run("variant-fix", **CONFIRM)
+    assert outcome.status is FixStatus.FAILED
+    assert not outcome.rolled_back  # there was nothing to undo
+    assert runner.run_calls == ["t.step1"]
 
 
 def test_a_successful_fix_is_never_rolled_back(tmp_path: Path) -> None:
@@ -363,3 +382,127 @@ def test_the_report_carries_the_failed_rollback_flag() -> None:
         }
     )
     assert isinstance(action, ReportAction) and action.rollback_failed is True
+
+
+# -- found by independent testing (F-04, F-05, F-06) ----------------------------------------------
+
+from vast_troubleshooter.fixes.base import OperandsUnavailable
+
+
+class OperandAwareRunner(FakeMutationRunner):
+    """Like the real runner, the planned command includes the operand."""
+
+    def plan(self, op_id: str, **operands: str):  # type: ignore[no-untyped-def]
+        argv, early = super().plan(op_id)
+        return [*argv, *operands.values()], early
+
+
+def test_apply_is_blocked_if_the_target_changed_since_the_preview(
+    tmp_path: Path,
+) -> None:
+    """F-04: the operator saw eth0; a second route made the tool pick eth1."""
+    link = {"link": "eth0"}
+    fix = variant(
+        commands=(FixStep("t.set", ("link",)),),
+        operand_source=lambda ctx: dict(link),
+    )
+    world = World()
+    runner = OperandAwareRunner(
+        {"t.set": ["/s"], "t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
+        on_run=world.on_run,
+    )
+    engine, runner, _, _ = build(tmp_path, fix, world, runner)
+    preview = engine.run("variant-fix")
+    assert preview.commands == (("/s", "eth0"),)
+
+    link["link"] = "eth1"  # the host changed while the operator was reading
+    outcome = engine.run("variant-fix", expected_commands=preview.commands, **CONFIRM)
+    assert outcome.block_code == "target_changed"
+    assert runner.run_calls == []  # nothing ran against eth1
+
+
+def test_apply_runs_when_the_target_is_what_was_previewed(tmp_path: Path) -> None:
+    fix = variant(
+        commands=(FixStep("t.set", ("link",)), FixStep("t.step2")),
+        operand_source=lambda ctx: {"link": "eth0"},
+    )
+    engine, _, _, _ = build(tmp_path, fix)
+    preview = engine.run("variant-fix")
+    outcome = engine.run("variant-fix", expected_commands=preview.commands, **CONFIRM)
+    assert outcome.status is FixStatus.SUCCEEDED
+
+
+def test_an_operand_source_can_refuse_with_its_own_reason(tmp_path: Path) -> None:
+    def refuse(ctx: HostContext) -> dict[str, str]:
+        raise OperandsUnavailable("eth0 already has its own DNS servers")
+
+    engine, runner, _, _ = build(tmp_path, variant(operand_source=refuse))
+    outcome = engine.run("variant-fix")
+    assert outcome.block_code == "operands_unavailable"
+    assert "already has its own DNS servers" in outcome.reasons[0]
+    assert runner.run_calls == []
+
+
+class FlakyLog(ActionLog):
+    """Writes fine until the change has started, then the disk 'fills up'."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.writes = 0
+
+    def write(self, record) -> None:  # type: ignore[no-untyped-def]
+        self.writes += 1
+        if self.writes > 1:  # the first write is `apply_started`
+            raise OSError(28, "No space left on device")
+        super().write(record)
+
+
+def test_a_log_failure_after_the_change_is_reported_not_raised(tmp_path: Path) -> None:
+    """F-06: it used to escape as an uncaught OSError after the system had changed."""
+    world = World()
+    runner = FakeMutationRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"]}, on_run=world.on_run
+    )
+    engine = FixEngine(
+        {BASE.id: BASE},
+        runner,
+        fake_context(),
+        RULES,
+        log=FlakyLog(tmp_path / "actions.jsonl"),
+        lock_path=tmp_path / "fix.lock",
+        rental_check=world.rental,
+        observe=world.observe,
+        clock=lambda: T0,
+        sleep=lambda s: None,
+    )
+    outcome = engine.run("variant-fix", **CONFIRM)  # must not raise
+    assert outcome.status is FixStatus.SUCCEEDED  # the fix did work
+    assert any("ACTION LOG COULD NOT BE WRITTEN" in r for r in outcome.reasons)
+
+
+def test_a_successful_fix_is_not_rolled_back_because_a_later_step_misreported(
+    tmp_path: Path,
+) -> None:
+    """F-05(a): the check passes, but the last command exited non-zero."""
+    runner = FakeMutationRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
+        results={
+            "t.step2": CommandResult("t.step2", CommandStatus.ERROR, returncode=1)
+        },
+        on_run=World().on_run,
+    )
+    world = World()
+    world.fixed_by = "t.step1"  # the first command fixes it; the second then fails
+    runner = FakeMutationRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]},
+        results={
+            "t.step2": CommandResult("t.step2", CommandStatus.ERROR, returncode=1)
+        },
+        on_run=world.on_run,
+    )
+    engine, runner, _, _ = build(
+        tmp_path, variant(rollback=(FixStep("t.undo"),)), world, runner
+    )
+    outcome = engine.run("variant-fix", **CONFIRM)
+    assert not outcome.rolled_back
+    assert "t.undo" not in runner.run_calls  # a working fix is left alone

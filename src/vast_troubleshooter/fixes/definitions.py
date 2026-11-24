@@ -8,7 +8,11 @@ import re
 from collections.abc import Mapping
 
 from vast_troubleshooter.context import HostContext
-from vast_troubleshooter.fixes.base import Fix, FixStep
+from vast_troubleshooter.fixes.base import (
+    Fix,
+    FixStep,
+    OperandsUnavailable,
+)
 from vast_troubleshooter.models import Fact, FactStatus
 from vast_troubleshooter.runner import Operation
 
@@ -112,7 +116,35 @@ def _default_link(ctx: HostContext) -> Mapping[str, str] | None:
     if len(links) != 1:
         return None  # no default route, or several: ambiguous, so advisory
     link = links.pop()
-    return {"link": link} if LINK.fullmatch(link) else None
+    if not LINK.fullmatch(link):
+        return None
+    _refuse_if_link_already_configured(ctx, link)
+    return {"link": link}
+
+
+def _refuse_if_link_already_configured(ctx: HostContext, link: str) -> None:
+    """The rollback is `resolvectl revert`, which resets the link to defaults.
+
+    That is only the same as "put it back" when the link had no settings of its
+    own. If it has some (or this cannot be read), refuse: replacing settings we
+    cannot restore would be worse than leaving the problem for the operator.
+    """
+    for op_id, what in (
+        ("dns.link_servers", "DNS servers"),
+        ("dns.link_domains", "search domains"),
+    ):
+        result = ctx.runner.run(op_id, link=link)
+        if not result.ok:
+            raise OperandsUnavailable(
+                f"cannot read the {what} already set on {link}, so they could not be restored"
+            )
+        # Output looks like "Link 2 (eth0): 192.0.2.1"; empty after the colon means none.
+        after_colon = result.stdout.strip().partition(":")[2].strip()
+        if after_colon or ":" not in result.stdout:
+            raise OperandsUnavailable(
+                f"{link} already has its own {what}; this fix would replace them and "
+                "cannot restore them. Change DNS by hand"
+            )
 
 
 FIX_DNS_RESOLVER = Fix(

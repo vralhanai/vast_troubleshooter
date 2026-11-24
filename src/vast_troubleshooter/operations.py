@@ -149,6 +149,19 @@ _OPERATIONS = (
     Operation(
         id="dns.default_route", executable="ip", args=("-o", "route", "show", "default")
     ),
+    # What a link is already configured with, so a fix can refuse to overwrite it.
+    Operation(
+        id="dns.link_servers",
+        executable="resolvectl",
+        args=("dns", "{link}"),
+        operands={"link": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}")},
+    ),
+    Operation(
+        id="dns.link_domains",
+        executable="resolvectl",
+        args=("domain", "{link}"),
+        operands={"link": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}")},
+    ),
     # `docker=True`: the runner pins the trusted local socket and refuses
     # environments that point at another daemon.
     Operation(
