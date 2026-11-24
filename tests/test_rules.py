@@ -56,6 +56,10 @@ CASES: dict[str, tuple[dict[str, object], dict[str, object]]] = {
         {"docker.nvidia_runtime_present": False},
         {"docker.nvidia_runtime_present": True},
     ),
+    "docker.daemon_not_running": (
+        {"docker.daemon_running": False},
+        {"docker.daemon_running": True},
+    ),
     "vast_host.service_not_active": (
         {"vast_host.service_active": False},
         {"vast_host.service_active": True},
@@ -518,3 +522,22 @@ def test_a_broken_nvidia_smi_gives_a_finding_not_a_pass() -> None:
 
 def test_facts_by_key_last_one_wins() -> None:
     assert facts_by_key([F("a", 1), F("a", 2)])["a"].value == 2
+
+
+# -- a broken installation must never look like an all-clear (F-08) ----------------
+
+
+def test_a_directory_with_no_rules_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleFileError, match="no rules"):
+        load_rules_dir(tmp_path)
+
+
+def test_a_missing_rule_directory_is_a_rule_file_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleFileError, match="cannot read"):
+        load_rules_dir(tmp_path / "does-not-exist")
+
+
+def test_a_rule_file_that_is_not_utf8_is_a_rule_file_error(tmp_path: Path) -> None:
+    (tmp_path / "a.toml").write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(RuleFileError, match="a.toml"):
+        load_rules_dir(tmp_path)

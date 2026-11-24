@@ -265,7 +265,8 @@ def test_unreadable_smart_never_looks_healthy() -> None:
             smart={"nvme0n1": CommandResult("disk.smart_x", CommandStatus.NEEDS_ROOT)}
         )
     )
-    assert "disk.smart_failed_count" not in facts  # no aggregate from no data
+    total = facts["disk.smart_failed_count"]  # present, but never a usable zero
+    assert total.status is not FactStatus.OK and total.value is None
     assert not any(
         k.endswith("smart_passed") and f.value is True for k, f in facts.items()
     )
@@ -402,3 +403,160 @@ def test_parse_ata_attributes_ignores_other_ids_and_trailing_notes() -> None:
 
 def test_registry_includes_disk() -> None:
     assert "disk" in COLLECTORS
+
+
+# -- a total is only a zero if every applicable drive was fully read (F-01) ----------------------
+# Found by independent testing: a readable SATA drive let the NVMe rules PASS while the NVMe
+# drive's SMART query had timed out.
+
+from vast_troubleshooter.rule_engine import evaluate_rules, load_default_rules
+
+_RULES = {r.id: r for r in load_default_rules()}
+_MIXED = (
+    'NAME="nvme0n1" ROTA="0" SIZE="1000204886016" MODEL="X" TRAN="nvme"\n'
+    'NAME="sda" ROTA="0" SIZE="500107862016" MODEL="Y" TRAN="sata"\n'
+)
+
+
+def _statuses(
+    lsblk: str, smart: dict[str, CommandResult]
+) -> tuple[dict[str, Fact], dict[str, str]]:
+    res = results()
+    res["disk.lsblk"] = ok("disk.lsblk", lsblk)
+    for device, result in smart.items():
+        res[f"disk.smart_x[device=/dev/{device}]"] = result
+    facts, _ = collect(res)
+    ruled = {
+        r.rule_id: r.status.value
+        for r in evaluate_rules(list(_RULES.values()), list(facts.values()))
+    }
+    return facts, ruled
+
+
+def test_a_readable_sata_drive_cannot_vouch_for_an_nvme_drive_that_timed_out() -> None:
+    facts, rules = _statuses(
+        _MIXED,
+        {
+            "sda": smart_ok(disk("smart_sata_healthy.txt")),
+            "nvme0n1": CommandResult("disk.smart_x", CommandStatus.TIMEOUT),
+        },
+    )
+    assert facts["disk.nvme_media_errors_total"].status is FactStatus.ERROR
+    assert facts["disk.nvme_media_errors_total"].value is None
+    assert "could not be fully read" in (
+        facts["disk.nvme_media_errors_total"].raw_excerpt or ""
+    )
+    assert rules["disk.nvme_unhealthy"] == "unknown"  # was "pass"
+    assert (
+        rules["disk.smart_health_failed"] == "unknown"
+    )  # one drive's health is not known
+    # The SATA drive was fully read, so the SATA totals are real zeros.
+    assert facts["disk.sata_pending_total"].value == 0
+    assert rules["disk.sata_bad_sectors"] == "pass"
+
+
+def test_a_failure_on_any_drive_stands_even_if_another_drive_could_not_be_read() -> (
+    None
+):
+    facts, rules = _statuses(
+        _MIXED,
+        {
+            "sda": smart_ok(disk("smart_sata_failing.txt"), code=8),
+            "nvme0n1": CommandResult("disk.smart_x", CommandStatus.TIMEOUT),
+        },
+    )
+    assert (
+        facts["disk.smart_failed_count"].value == 1
+    )  # positive evidence is never cancelled
+    assert facts["disk.sata_pending_total"].value == 8
+    assert rules["disk.smart_health_failed"] == "fail"
+    assert rules["disk.sata_bad_sectors"] == "fail"
+    assert rules["disk.nvme_unhealthy"] == "unknown"
+
+
+def test_an_nvme_failure_stands_even_if_a_sata_drive_could_not_be_read() -> None:
+    _, rules = _statuses(
+        _MIXED,
+        {
+            "nvme0n1": smart_ok(disk("smart_nvme_failing.txt"), code=8),
+            "sda": CommandResult("disk.smart_x", CommandStatus.NEEDS_ROOT),
+        },
+    )
+    assert rules["disk.nvme_unhealthy"] == "fail"
+    assert rules["disk.smart_health_failed"] == "fail"
+    assert rules["disk.sata_bad_sectors"] == "unknown"
+
+
+def test_all_drives_fully_read_gives_real_zeros_and_passes() -> None:
+    facts, rules = _statuses(
+        _MIXED,
+        {
+            "sda": smart_ok(disk("smart_sata_healthy.txt")),
+            "nvme0n1": smart_ok(disk("smart_nvme_healthy.txt")),
+        },
+    )
+    for key in (
+        "smart_failed_count",
+        "nvme_critical_warning_count",
+        "nvme_media_errors_total",
+        "sata_pending_total",
+    ):
+        assert (
+            facts[f"disk.{key}"].value == 0
+            and facts[f"disk.{key}"].status is FactStatus.OK
+        )
+    assert {
+        rules[r]
+        for r in (
+            "disk.smart_health_failed",
+            "disk.nvme_unhealthy",
+            "disk.sata_bad_sectors",
+        )
+    } == {"pass"}
+
+
+def test_a_drive_with_no_health_line_makes_the_health_total_unknown() -> None:
+    _, rules = _statuses(
+        _MIXED,
+        {
+            "sda": smart_ok(disk("smart_sata_healthy.txt")),
+            "nvme0n1": smart_ok(
+                "SMART support is: Unavailable - device lacks SMART capability.\n"
+            ),
+        },
+    )
+    assert rules["disk.smart_health_failed"] == "unknown"
+    assert rules["disk.nvme_unhealthy"] == "unknown"  # no NVMe health fields either
+
+
+def test_an_nvme_drive_read_without_its_nvme_fields_is_incomplete() -> None:
+    health_only = "SMART overall-health self-assessment test result: PASSED\n"
+    facts, rules = _statuses(
+        _MIXED.splitlines()[0] + "\n", {"nvme0n1": smart_ok(health_only)}
+    )
+    assert facts["disk.nvme_media_errors_total"].status is FactStatus.ERROR
+    assert rules["disk.nvme_unhealthy"] == "unknown"
+
+
+def test_a_sas_style_drive_without_an_attribute_table_leaves_the_sata_totals_unknown() -> (
+    None
+):
+    sas = 'NAME="sda" ROTA="1" SIZE="1" MODEL="S" TRAN="sas"\n'
+    _, rules = _statuses(sas, {"sda": smart_ok("SMART Health Status: OK\n")})
+    assert rules["disk.smart_health_failed"] == "pass"  # its health WAS read
+    assert rules["disk.sata_bad_sectors"] == "unknown"  # but no sector counts were
+
+
+def test_only_nvme_drives_present_means_no_sata_drive_is_missing() -> None:
+    facts, rules = _statuses(
+        _MIXED.splitlines()[0] + "\n",
+        {"nvme0n1": smart_ok(disk("smart_nvme_healthy.txt"))},
+    )
+    assert facts["disk.sata_pending_total"].value == 0  # there is nothing SATA to read
+    assert rules["disk.sata_bad_sectors"] == "pass"
+
+
+def test_no_physical_drives_means_no_totals_at_all() -> None:
+    facts, rules = _statuses('NAME="vda" ROTA="1" SIZE="1" MODEL="" TRAN=""\n', {})
+    assert "disk.smart_failed_count" not in facts
+    assert rules["disk.smart_health_failed"] == "unknown"

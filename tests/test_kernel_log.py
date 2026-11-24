@@ -272,3 +272,46 @@ def test_kernel_operations_need_root_and_never_page() -> None:
 
 def test_registry_includes_kernel_log() -> None:
     assert "kernel_log" in COLLECTORS
+
+
+# -- cut-off output proves only what it contains (F-02) -------------------------
+
+
+def _rules_for(facts: dict[str, Fact]) -> dict[str, str]:
+    from vast_troubleshooter.rule_engine import evaluate_rules, load_default_rules
+
+    return {
+        r.rule_id: r.status.value
+        for r in evaluate_rules(load_default_rules(), list(facts.values()))
+    }
+
+
+def test_truncated_clean_output_is_not_a_clean_bill() -> None:
+    facts, _ = collect({JOURNAL: ok(JOURNAL, "boot line\n", truncated=True)})
+    for key in COUNT_KEYS:
+        assert facts[key].status is FactStatus.ERROR and facts[key].value is None
+    rules = _rules_for(facts)
+    assert rules["kernel_log.xid_errors"] == "unknown"  # was "pass"
+    assert rules["kernel_log.xid_79_gpu_fell_off_bus"] == "unknown"  # was "pass"
+
+
+def test_truncated_output_with_other_xids_cannot_rule_out_79() -> None:
+    body = "NVRM: Xid (PCI:0000:01:00): 13, Graphics exception\n"
+    facts, _ = collect({JOURNAL: ok(JOURNAL, body, truncated=True)})
+    assert facts["kernel_log.xid_count"].value == 1  # real events still count
+    assert facts["kernel_log.xid_codes"].status is FactStatus.ERROR
+    rules = _rules_for(facts)
+    assert rules["kernel_log.xid_errors"] == "fail"
+    assert rules["kernel_log.xid_79_gpu_fell_off_bus"] == "unknown"
+
+
+def test_truncated_output_that_did_show_xid_79_still_fails() -> None:
+    facts, _ = collect(
+        {JOURNAL: ok(JOURNAL, text("xid79_journal.txt"), truncated=True)}
+    )
+    assert _rules_for(facts)["kernel_log.xid_79_gpu_fell_off_bus"] == "fail"
+
+
+def test_complete_clean_output_still_passes() -> None:
+    facts, _ = collect({JOURNAL: ok(JOURNAL, "boot line\n")})
+    assert _rules_for(facts)["kernel_log.xid_79_gpu_fell_off_bus"] == "pass"

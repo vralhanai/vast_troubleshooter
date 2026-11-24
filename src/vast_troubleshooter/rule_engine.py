@@ -217,22 +217,31 @@ def load_rules_dir(
     known_fix_ids: Iterable[str] | None = None,
 ) -> list[Rule]:
     """Load every *.toml in a directory, in file-name order. All or nothing."""
-    files = sorted(
-        (f for f in directory.iterdir() if f.name.endswith(".toml")),
-        key=lambda f: f.name,
-    )
+    try:
+        files = sorted(
+            (f for f in directory.iterdir() if f.name.endswith(".toml")),
+            key=lambda f: f.name,
+        )
+    except OSError as exc:
+        raise RuleFileError(f"cannot read the rule directory ({exc})") from exc
     rules: list[Rule] = []
     seen: dict[str, str] = {}
     for file in files:
-        for rule in load_rules_text(
-            file.read_text(encoding="utf-8"), file.name, known_fix_ids
-        ):
+        try:
+            text = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RuleFileError(
+                f"{file.name}: cannot read the rule file ({exc})"
+            ) from exc
+        for rule in load_rules_text(text, file.name, known_fix_ids):
             if rule.id in seen:
                 raise RuleFileError(
                     f"{file.name}: duplicate rule id {rule.id!r} (also in {seen[rule.id]})"
                 )
             seen[rule.id] = file.name
             rules.append(rule)
+    if not rules:
+        raise RuleFileError("no rules were found, so nothing could be checked")
     if len(rules) > MAX_RULES:
         raise RuleFileError(f"more than {MAX_RULES} rules")
     return rules

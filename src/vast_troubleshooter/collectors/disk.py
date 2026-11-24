@@ -233,7 +233,7 @@ class DiskCollector(Collector):
             return [self.failed_from_result("disk.drive_count", result)]
         src = result.source_command
         facts: list[Fact] = []
-        physical: list[str] = []
+        physical: list[tuple[str, str]] = []
         names = 0
         hdds = 0
         for row in parse_lsblk(result.stdout):
@@ -274,17 +274,27 @@ class DiskCollector(Collector):
                     )
                 )
             if row.get("TRAN") in _PHYSICAL_TRANSPORTS and _DEVICE_NAME.fullmatch(name):
-                physical.append(name)
+                physical.append((name, row["TRAN"]))
         facts.insert(0, self.fact("disk.drive_count", names, source_command=src))
         facts.insert(1, self.fact("disk.hdd_count", hdds, source_command=src))
         facts += self._smart(ctx, physical)
         return facts
 
-    def _smart(self, ctx: HostContext, drives: list[str]) -> list[Fact]:
+    def _smart(self, ctx: HostContext, drives: list[tuple[str, str]]) -> list[Fact]:
+        """SMART facts per drive, plus totals across drives.
+
+        A total is only reported as a real number when every drive it applies to
+        was fully read. A non-zero total always stands: it is positive evidence
+        of failure, and an unreadable drive cannot cancel it. A zero is only
+        proof if nothing was left unread, so otherwise the total is unknown.
+        """
         facts: list[Fact] = []
-        read = failed = warn = 0
+        failed = warn = 0
         totals = {"media": 0, "realloc": 0, "pending": 0, "uncorrect": 0}
-        for name in drives:
+        # Drives whose value could not be established, per diagnostic.
+        health_missing = nvme_missing = sata_missing = 0
+        for name, transport in drives:
+            nvme_drive = transport == "nvme"
             result = ctx.runner.run("disk.smart_x", device=f"/dev/{name}")
             key = f"disk.{name}.smart_passed"
             usable = result.status in {
@@ -293,10 +303,16 @@ class DiskCollector(Collector):
             } and _SMART_WORD.search(result.stdout)
             if not usable:
                 facts.append(self.failed_from_result(key, result))
+                health_missing += 1
+                if nvme_drive:
+                    nvme_missing += 1
+                else:
+                    sata_missing += 1
                 continue
             src = result.source_command
             passed = smart_health(result.stdout)
             if passed is None:
+                health_missing += 1
                 facts.append(
                     self.fact(
                         key,
@@ -306,7 +322,6 @@ class DiskCollector(Collector):
                     )
                 )
             else:
-                read += 1
                 failed += not passed
                 facts.append(self.fact(key, passed, source_command=src))
             nvme = parse_nvme(result.stdout)
@@ -318,6 +333,11 @@ class DiskCollector(Collector):
                 totals["media"] += nvme["media_errors"]  # type: ignore[operator]
             if nvme.get("critical_warning") not in (None, "", "0x00"):
                 warn += 1
+            if nvme_drive and not (
+                isinstance(nvme.get("media_errors"), int)
+                and nvme.get("critical_warning") not in (None, "")
+            ):
+                nvme_missing += 1  # an NVMe drive without its NVMe health fields
             if isinstance(nvme.get("available_spare_pct"), int) and isinstance(
                 nvme.get("spare_threshold_pct"), int
             ):
@@ -328,7 +348,8 @@ class DiskCollector(Collector):
                         source_command=src,
                     )
                 )
-            for field, value in parse_ata_attributes(result.stdout).items():
+            ata = parse_ata_attributes(result.stdout)
+            for field, value in ata.items():
                 facts.append(
                     self.fact(f"disk.{name}.{field}", value, source_command=src)
                 )
@@ -338,13 +359,32 @@ class DiskCollector(Collector):
                     totals["pending"] += value
                 elif field in {"reported_uncorrect", "offline_uncorrectable"}:
                     totals["uncorrect"] += value
-        if read:
-            facts += [
-                self.fact("disk.smart_failed_count", failed),
-                self.fact("disk.nvme_critical_warning_count", warn),
-                self.fact("disk.nvme_media_errors_total", totals["media"]),
-                self.fact("disk.sata_reallocated_total", totals["realloc"]),
-                self.fact("disk.sata_pending_total", totals["pending"]),
-                self.fact("disk.sata_uncorrectable_total", totals["uncorrect"]),
-            ]
+            if not nvme_drive and not (
+                "reallocated_sectors" in ata and "pending_sectors" in ata
+            ):
+                sata_missing += 1  # no attribute table (a SAS drive, or a failed read)
+
+        if not drives:
+            return facts
+
+        def total(key: str, value: int, missing: int) -> Fact:
+            if missing == 0 or value > 0:
+                return self.fact(key, value)
+            return self.fact(
+                key,
+                status=FactStatus.ERROR,
+                raw_excerpt=(
+                    f"{missing} drive(s) could not be fully read, "
+                    "so a zero would not be proof"
+                ),
+            )
+
+        facts += [
+            total("disk.smart_failed_count", failed, health_missing),
+            total("disk.nvme_critical_warning_count", warn, nvme_missing),
+            total("disk.nvme_media_errors_total", totals["media"], nvme_missing),
+            total("disk.sata_reallocated_total", totals["realloc"], sata_missing),
+            total("disk.sata_pending_total", totals["pending"], sata_missing),
+            total("disk.sata_uncorrectable_total", totals["uncorrect"], sata_missing),
+        ]
         return facts

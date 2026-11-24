@@ -388,3 +388,14 @@ offline wheel install could not resolve `pydantic` without a registry. None is a
 project bug. A Linux-only CI job from a full checkout is still needed, because the
 Compose test image skips the repository-level Docker tests by design.
 
+## 11. Fix log
+
+Findings are fixed in groups, one commit per group, each with regression tests
+built from the reproductions above. The status line at the top of this file
+describes the state when the findings were recorded; this section is the current
+state.
+
+| Group | Findings | Status | What changed |
+|---|---|---|---|
+| 1. "Could not read" is always unknown | F-01, F-02, F-08, F-09, F-10 | **FIXED** (suite: 796 passed, 6 skipped) | SMART totals are real numbers only if every applicable drive was fully read; a non-zero total always stands. A truncated kernel log turns zeros and a missing Xid 79 into unknown. An empty, unreadable, or non-UTF-8 rule set is a tool error (exit 2). New rule `docker.daemon_not_running`. A launch failure of `nvidia-smi` is unknown, not "failing". |
+

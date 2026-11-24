@@ -13,7 +13,7 @@ from typing import ClassVar
 
 from vast_troubleshooter.collectors.base import Collector
 from vast_troubleshooter.context import HostContext
-from vast_troubleshooter.models import Fact
+from vast_troubleshooter.models import Fact, FactStatus
 from vast_troubleshooter.runner import CommandResult, CommandStatus
 
 _XID = re.compile(r"NVRM: Xid \(PCI:([^)]+)\):\s*(\d+)", re.IGNORECASE)
@@ -133,7 +133,41 @@ class KernelLogCollector(Collector):
             text = result.stdout
 
         found = analyze(text)
-        return self._facts(found, source, result)
+        facts = self._facts(found, source, result)
+        return (
+            self._unprovable_when_truncated(facts, result)
+            if result.truncated
+            else facts
+        )
+
+    def _unprovable_when_truncated(
+        self, facts: list[Fact], result: CommandResult
+    ) -> list[Fact]:
+        """Cut-off output only proves what it contains.
+
+        A count above zero stands (the events are real). A zero, and the
+        absence of Xid 79 from the code list, would claim something about the
+        part of the log we never saw, so those become unknown instead.
+        """
+        note = "the kernel log output was cut off, so absence of events is not proven"
+        out: list[Fact] = []
+        for fact in facts:
+            is_zero_count = fact.key in COUNT_KEYS and fact.value == 0
+            no_79 = fact.key == "kernel_log.xid_codes" and "79" not in str(
+                fact.value
+            ).split(",")
+            if is_zero_count or no_79:
+                out.append(
+                    self.fact(
+                        fact.key,
+                        status=FactStatus.ERROR,
+                        source_command=result.source_command or None,
+                        raw_excerpt=note,
+                    )
+                )
+            else:
+                out.append(fact)
+        return out
 
     def _unreadable(self, result: CommandResult) -> list[Fact]:
         facts = [self.failed_from_result(key, result) for key in COUNT_KEYS]

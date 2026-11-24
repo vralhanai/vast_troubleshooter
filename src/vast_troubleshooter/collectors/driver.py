@@ -32,7 +32,13 @@ class DriverCollector(Collector):
 
         # Refused or not allowed to run: nvidia-smi was never run, so nothing was
         # observed. That is unknown, not "nvidia-smi is failing".
-        if result.status in {CommandStatus.REFUSED, CommandStatus.NEEDS_ROOT}:
+        # A launch failure (the process never started, so there is no exit code)
+        # is the same: nothing was observed about the driver.
+        not_started = result.status is CommandStatus.ERROR and result.returncode is None
+        if not_started or result.status in {
+            CommandStatus.REFUSED,
+            CommandStatus.NEEDS_ROOT,
+        }:
             return [
                 self.failed_from_result(key, result)
                 for key in (

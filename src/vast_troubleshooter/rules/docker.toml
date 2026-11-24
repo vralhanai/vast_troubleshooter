@@ -13,3 +13,17 @@ checked = "2026-11-23"
 type = "equals"
 fact = "docker.nvidia_runtime_present"
 value = false
+
+[[rule]]
+id = "docker.daemon_not_running"
+title = "The Docker daemon is not running"
+severity = "critical"
+category = "offline"
+recommendation = "Vast starts every rental through Docker, so a stopped daemon keeps the host from working. Check 'systemctl status docker' and 'journalctl -u docker' for why it stopped, then start it. Wait until no rentals are active before restarting anything."
+source = "https://docs.vast.ai/host/machine-offline"
+checked = "2026-11-23"
+
+[rule.when]
+type = "equals"
+fact = "docker.daemon_running"
+value = false

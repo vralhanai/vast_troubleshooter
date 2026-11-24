@@ -380,3 +380,25 @@ def test_a_command_that_was_never_run_is_unknown_not_a_failing_nvidia_smi(
     responding = facts["driver.nvidia_smi_responding"]
     assert responding.value is None
     assert responding.status is not FactStatus.OK
+
+
+# -- a command that never started says nothing about the driver (F-10) ------------
+
+
+def test_nvidia_smi_that_could_not_be_launched_is_unknown_not_failing() -> None:
+    launch_failure = CommandResult(
+        "driver.smi_summary",
+        CommandStatus.ERROR,
+        returncode=None,
+        detail="could not start: [Errno 13] Permission denied",
+    )
+    facts = driver_facts(fake_context(results={"driver.smi_summary": launch_failure}))
+    responding = facts["driver.nvidia_smi_responding"]
+    assert responding.value is None and responding.status is FactStatus.ERROR
+
+
+def test_nvidia_smi_that_ran_and_failed_is_still_a_failing_driver() -> None:
+    facts = driver_facts(
+        fake_context(results={"driver.smi_summary": failed("driver.smi_summary")})
+    )
+    assert facts["driver.nvidia_smi_responding"].value is False
