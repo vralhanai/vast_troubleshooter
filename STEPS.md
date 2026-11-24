@@ -25,7 +25,7 @@ Tick a step only after it is verified and committed. Inside each step, tick each
 - [x] **Step 16:** Reports and redaction (POSIX-only checks still open)
 - [x] **Step 17:** Docker image for Windows dev and test (NVIDIA GPU and amd64 still untested)
 - [x] **Step 18:** POC end-to-end test (on a systemd container, not a VM or a Vast host)
-- [ ] **Step 19:** Packaging and release
+- [x] **Step 19:** Packaging and release (`v0.1.0`; PyPI upload and a real-host run still open)
 
 Review and fix round before step 19 (2026-11-24): independent review and testing (`TestingDoneByClaude.md`, `CodeReviewByCodex.md`, `TestingDoneByCodex.md`) found 33 issues; all are fixed except F-21 (moved to `BACKLOG.md`). Verified: Windows 858 passed, 14 skipped; real Linux 819 passed (non-root) and 821 passed (root); coverage 97%; ruff and mypy clean; the real-systemd end-to-end run passes 54 checks. Still not done: a real Vast host, a real NVIDIA GPU, `amd64`, and VM rental detection, so the CLI cannot yet apply a fix to a live host. **Next: step 19 (packaging and release).**
 
@@ -500,14 +500,14 @@ Not in the first set, because they are disruptive or unverified: controller rese
 **Goal:** Installable with `uv`, with a clear license and version.
 
 **Scope:**
-- [ ] `uv build` produces a wheel and sdist. Include the rule TOML files and `LICENSE`.
-- [ ] Install from the built wheel into a clean environment and run `vast-troubleshooter --help`.
-- [ ] Version bumped to `0.1.0` in `pyproject.toml`, with a CHANGELOG entry.
-- [ ] Checksums for the built artifacts.
-- [ ] Frozen install from the committed lockfile. Build verified from a clean checkout. Container base image pinned by digest. Document how security fixes reach users.
+- [x] `uv build` produces a wheel and sdist. Include the rule TOML files and `LICENSE`.
+- [x] Install from the built wheel into a clean environment and run `vast-troubleshooter --help`.
+- [x] Version bumped to `0.1.0` in `pyproject.toml`, with a CHANGELOG entry.
+- [x] Checksums for the built artifacts.
+- [x] Frozen install from the committed lockfile. Build verified from a clean checkout. Container base image pinned by digest. Document how security fixes reach users.
 
 **Verify:**
-- [ ] Clean install works. `--help`, `version`, and `diagnose --json` run.
+- [x] Clean install works. `--help`, `version`, and `diagnose --json` run.
 
 **Commit:** `chore(release): package v0.1.0 with checksums and changelog`
 
