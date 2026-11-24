@@ -1,0 +1,9 @@
+# Files that run on Linux, or are recordings of Linux output, must stay LF even on a
+# Windows checkout (git's autocrlf would otherwise turn them into CRLF and break them).
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+e2e/** text eol=lf
+tests/fixtures/** text eol=lf
+src/vast_troubleshooter/rules/*.toml text eol=lf
