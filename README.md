@@ -2,7 +2,7 @@
 
 An independent, local, command-line diagnostic and repair assistant for [Vast.ai](https://vast.ai) hosts. It inspects a Linux host machine, explains what is wrong, and (with consent) fixes it.
 
-> Status: **Design phase, POC next.** No working code yet. See [PLAN.md](PLAN.md) for the three-level plan.
+> Status: **Proof of concept (0.1, pre-release).** The CLI works end to end on Linux: `diagnose`, `fix` (dry run by default) and `report`. It has been tested in Docker and on real systemd, **never on a real Vast host**, so it cannot yet apply a fix to a live host (rental detection is a fail-closed stub, see [docs/rental-detection.md](docs/rental-detection.md)). Packaging (step 19) is next. See [PLAN.md](PLAN.md) for the design, [STEPS.md](STEPS.md) for progress, [BACKLOG.md](BACKLOG.md) for what is left, and [TestingDoneByClaude.md](TestingDoneByClaude.md) for the independent review and its fixes.
 
 ## 1. Problem
 

@@ -25,8 +25,12 @@ from it. Step numbers (`### 4.` and so on) refer to that file.
 | Internet DNS via Docker Desktop's NAT | The faults were injected by this script |
 
 The container is started with `SYS_ADMIN` and `NET_ADMIN`, unconfined seccomp and
-AppArmor, and a cgroup mount. It is **not** `--privileged`. The test machine image
-is never the default build (a test checks this).
+AppArmor, and **its own private cgroup namespace** (its cgroup view is remounted
+read-write from inside; no host cgroup tree, socket or file is mounted into it). It
+is **not** `--privileged`. Its name is unique per run, so the script never removes an
+unrelated container. The test machine image is never the default build (a test checks
+this). The script **checks** every scenario and exits non-zero if any check fails
+(54 checks in the latest run, all passing).
 
 ## Results against the plan
 
@@ -35,7 +39,7 @@ is never the default build (a test checks this).
 | Inject a known fault: break DNS for `vast.ai` | Done. systemd-resolved with **no upstream DNS server**. `getaddrinfo` fails: `RESOLUTION FAILED ... Temporary failure in name resolution`. | step 3 |
 | Run `diagnose`. It must report the DNS finding | **Pass.** `CRITICAL DNS cannot resolve vast.ai (offline)`, evidence `network.dns_vast_ai_resolves = False [ok]`. | step 4 |
 | Run the DNS fix dry-run, then apply with confirmation | **Dry run: pass.** **Apply: pass, through the harness only.** Through the real CLI: blocked, by design. | steps 6 and 9 |
-| Re-run `diagnose`. The finding must clear | **Pass.** `0 problem(s)`, and `vast.ai` resolves again. | steps 9, 10 |
+| Re-run `diagnose`. The finding must clear | **Pass.** The DNS finding is gone and `vast.ai` resolves again. (One problem remains: the stand-in machine has no Docker daemon, so `docker.daemon_not_running` fires, correctly.) | steps 9, 10 |
 | Simulate an active rental using the step 13 evidence source, confirm the fix is blocked | **Pass.** One container "running" gives `rentals.state = active`. The fix is `BLOCKED ... rental state is active`. | step 7a |
 | Remove that evidence: the state becomes `unknown` and the fix stays blocked | **Pass.** `rentals.state = unknown` (the VM source cannot prove absence), still `BLOCKED`. | step 7b |
 | Generate a report. Check it is redacted | **Pass.** See "Report" below. | step 15 |

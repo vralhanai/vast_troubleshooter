@@ -1,7 +1,7 @@
 [project]
 name = "vast-troubleshooter"
 version = "0.1.0"
-description = "Add your description here"
+description = "A local, offline command-line tool that diagnoses (and, with consent, fixes) problems on Vast.ai Linux GPU hosts"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

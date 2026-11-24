@@ -5,8 +5,8 @@ This plan has three levels, as defined in the README. Each level builds on the o
 | Level | Document | Output | Status |
 |---|---|---|---|
 | 1 | Rough system design | Architecture, modules, data flow, security model | **Draft v2, decisions applied** |
-| 2 | Detailed specification | Check specs, rule schema, CLI contract, test plan | Outline |
-| 3 | Working system | Runnable tool, built milestone by milestone | Outline |
+| 2 | Detailed specification | Check specs, rule schema, CLI contract, test plan | **Done**, in [STEPS.md](STEPS.md) (steps 0 to 19) |
+| 3 | Working system | Runnable tool, built milestone by milestone | **Steps 0 to 18 built and verified**; step 19 (packaging) not started. Progress is tracked in [STEPS.md](STEPS.md) |
 
 ---
 

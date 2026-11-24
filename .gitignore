@@ -9,5 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Test, coverage and type-check output
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+
 # Local Claude Code settings
 .claude/

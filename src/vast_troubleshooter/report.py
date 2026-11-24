@@ -376,9 +376,11 @@ def render_markdown(report: Report) -> str:
     add("")
     if not report.unknown:
         add("Every check could be decided.")
-    for item in report.unknown:
-        why = ", ".join(item.reasons) or "no data"
-        add(f"- {md(item.title or item.rule_id)} \\({md(item.severity)}\\): {md(why)}")
+    for entry in report.unknown:
+        why = ", ".join(entry.reasons) or "no data"
+        add(
+            f"- {md(entry.title or entry.rule_id)} \\({md(entry.severity)}\\): {md(why)}"
+        )
     add("")
     add("## Fix actions")
     add("")

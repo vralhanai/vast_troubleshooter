@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 
 from vast_troubleshooter.context import HostContext
 from vast_troubleshooter.models import Fact
@@ -84,6 +84,15 @@ class Fix:
     # Only for a disposable test machine. Refused unless the operator says so.
     demo_only: bool = False
     warnings: tuple[str, ...] = ()
+
+    @property
+    def command_steps(self) -> tuple[FixStep, ...]:
+        """`commands` as steps (a bare op id is turned into a step in __post_init__)."""
+        return cast("tuple[FixStep, ...]", self.commands)
+
+    @property
+    def rollback_steps(self) -> tuple[FixStep, ...]:
+        return cast("tuple[FixStep, ...]", self.rollback)
 
     def __post_init__(self) -> None:
         if not _FIX_ID.fullmatch(self.id):

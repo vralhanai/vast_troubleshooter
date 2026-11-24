@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import BinaryIO, Protocol
+from typing import IO, Protocol
 
 TRUSTED_DOCKER_ENDPOINT = "unix:///var/run/docker.sock"
 DEFAULT_TIMEOUT = 10.0
@@ -118,7 +118,7 @@ _KILL_GRACE = 5.0
 class _Capture:
     """Drain a pipe on a thread, keeping at most `limit` bytes."""
 
-    def __init__(self, stream: BinaryIO, limit: int) -> None:
+    def __init__(self, stream: IO[bytes], limit: int) -> None:
         self._stream = stream
         self._limit = limit
         self._buffer = bytearray()
@@ -340,7 +340,7 @@ def _child_env() -> dict[str, str]:
 def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
     try:
         if _POSIX:
-            os.killpg(proc.pid, signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)  # type: ignore[attr-defined,unused-ignore]
         else:
             proc.kill()
     except ProcessLookupError, PermissionError, OSError:

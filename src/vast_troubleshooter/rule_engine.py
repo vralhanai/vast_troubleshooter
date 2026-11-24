@@ -354,10 +354,20 @@ def _eval(cond: Condition, facts: Facts) -> tuple[Tri, list[str]]:
 
 
 def evaluate_rule(rule: Rule, facts: Facts) -> RuleResult:
-    def result(status: CheckStatus, **extra: object) -> RuleResult:
+    def result(
+        status: CheckStatus,
+        finding: Finding | None = None,
+        reasons: tuple[str, ...] = (),
+    ) -> RuleResult:
         return RuleResult(
-            rule.id, status, rule.severity, rule.category, rule.title, **extra
-        )  # type: ignore[arg-type]
+            rule.id,
+            status,
+            rule.severity,
+            rule.category,
+            rule.title,
+            finding,
+            reasons,
+        )
 
     if rule.only_if is not None:
         applies, reasons = _eval(rule.only_if, facts)
