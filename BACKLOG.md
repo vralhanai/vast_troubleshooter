@@ -236,6 +236,7 @@ Real observations from running the tool in a container on a Windows ARM64 laptop
 | P2 | **Add the e2e run to CI.** | It needs a runner that allows `SYS_ADMIN` and `NET_ADMIN` containers and systemd. |
 | P3 | **Docker Desktop answers DNS sent to any address,** so a "dead upstream" is not a usable fault there. | The e2e scenario uses a resolver with no upstream instead. A real VM would allow other faults (unreachable upstream, wrong search domain, split DNS). |
 | P3 | **Test the fix against other resolver managers.** | Only systemd-resolved was exercised. NetworkManager, netplan with networkd, and a static `resolv.conf` are refused by design; confirm each is refused for the right reason on real setups. |
+| P3 | **State directory differs for root and for a normal user.** | Fixes run as root and log to `/var/lib/vast-troubleshooter`; a normal user's `report` reads `~/.local/state/vast-troubleshooter`, so it does not show actions taken with `sudo`. The root log is 0600 on purpose. Decide whether `report` should accept an explicit `--action-log` path (readable by an admin running it with `sudo`) or whether one shared group-readable location is acceptable. (Found in independent testing, F-21.) |
 
 ---
 

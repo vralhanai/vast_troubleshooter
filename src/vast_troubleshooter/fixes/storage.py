@@ -15,8 +15,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-from vast_troubleshooter.securefs import NOFOLLOW as _NOFOLLOW
 from vast_troubleshooter.securefs import check_not_symlink as _check_not_symlink
+from vast_troubleshooter.securefs import ensure_private_dir, open_private
 
 
 def state_dir() -> Path:
@@ -34,8 +34,8 @@ def state_dir() -> Path:
 
 
 def _prepare(path: Path) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _check_not_symlink(path.parent)
+    """The state directory must be ours and private, and the file not a symlink."""
+    ensure_private_dir(path.parent)
     _check_not_symlink(path)
 
 
@@ -52,7 +52,7 @@ class ProcessLock:
 
     def acquire(self) -> None:
         _prepare(self.path)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT | _NOFOLLOW, 0o600)
+        fd = open_private(self.path, os.O_RDWR)  # refuses another user's file
         try:
             if sys.platform == "win32":
                 import msvcrt
@@ -117,11 +117,11 @@ class ActionLog:
         if self.path is not None:
             _prepare(self.path)
             line = json.dumps(record, sort_keys=True) + "\n"
-            fd = os.open(
-                self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600
-            )
+            fd = open_private(self.path, os.O_WRONLY | os.O_APPEND)
             try:
-                os.write(fd, line.encode("utf-8"))
+                data = memoryview(line.encode("utf-8"))
+                while data:
+                    data = data[os.write(fd, data) :]
                 os.fsync(fd)
             finally:
                 os.close(fd)
