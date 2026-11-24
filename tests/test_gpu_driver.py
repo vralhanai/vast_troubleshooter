@@ -256,7 +256,9 @@ def test_row_with_wrong_field_count_is_an_error_fact() -> None:
     )
     facts = gpu_facts(ctx)
     assert facts["gpu.0.row"].status is FactStatus.ERROR
-    assert facts["gpu.count"].value == 0
+    # No count is claimed from a row that could not be read (it used to say 0).
+    assert facts["gpu.count"].status is FactStatus.ERROR
+    assert facts["gpu.count"].value is None
 
 
 def test_throttle_falls_back_to_the_legacy_field_name() -> None:
@@ -402,3 +404,25 @@ def test_nvidia_smi_that_ran_and_failed_is_still_a_failing_driver() -> None:
         fake_context(results={"driver.smi_summary": failed("driver.smi_summary")})
     )
     assert facts["driver.nvidia_smi_responding"].value is False
+
+
+# -- hostile nvidia-smi output never raises (F-24) ------------------------------------------------
+
+
+def test_an_oversized_csv_field_is_a_malformed_row_not_a_crash() -> None:
+    huge = "x" * 300_000
+    ctx = fake_context(
+        results={
+            "gpu.query": ok("gpu.query", f"0, {huge}, 1, 2\n"),
+            "gpu.throttle_event": ok("gpu.throttle_event", f'{huge}, "unterminated\n'),
+            "gpu.lspci_nvidia": ok("gpu.lspci_nvidia", ""),
+        }
+    )
+    facts = gpu_facts(ctx)  # must not raise
+    # The malformed row is not trusted: no GPU count is claimed from it, and the
+    # oversized throttle row does not produce a "no throttling" answer either.
+    assert facts["gpu.count"].status is not FactStatus.OK
+    assert not any(
+        f.status is FactStatus.OK and f.key.startswith("gpu.throttle") and f.value == 0
+        for f in facts.values()
+    )

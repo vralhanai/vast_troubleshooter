@@ -560,3 +560,31 @@ def test_no_physical_drives_means_no_totals_at_all() -> None:
     facts, rules = _statuses('NAME="vda" ROTA="1" SIZE="1" MODEL="" TRAN=""\n', {})
     assert "disk.smart_failed_count" not in facts
     assert rules["disk.smart_health_failed"] == "unknown"
+
+
+# -- hostile output is bounded and never raises (F-24) ------------------------------------------------
+
+
+def test_hostile_lsblk_and_smartctl_text_is_handled_quickly() -> None:
+    import time
+
+    from vast_troubleshooter.collectors.disk import parse_ata_attributes, parse_lsblk
+
+    start = time.monotonic()
+    assert parse_lsblk("a" * 200_000 + "\n" + 'NAME="sda" TRAN="sata"\n') == [
+        {"NAME": "sda", "TRAN": "sata"}
+    ]
+    assert parse_lsblk("\n".join(['NAME="x"'] * 5000))  # capped, not an error
+    assert parse_ata_attributes("(" * 200_000) == {}
+    assert parse_ata_attributes("(" * 50_000 + ")") == {}
+    assert time.monotonic() - start < 3.0
+
+
+def test_a_trailing_note_in_an_attribute_row_is_still_dropped() -> None:
+    from vast_troubleshooter.collectors.disk import parse_ata_attributes
+
+    row = (
+        "194 Temperature_Celsius 0x0022 062 045 000 Old_age Always - 38 (Min/Max 20/45)"
+    )
+    pending = "197 Current_Pending_Sector 0x0032 100 100 000 Old_age Always - 8"
+    assert parse_ata_attributes(pending + "\n" + row) == {"pending_sectors": 8}

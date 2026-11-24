@@ -140,7 +140,7 @@ def test_empty_uname_output_is_an_error() -> None:
 @pytest.mark.parametrize("text", ["", "abc def\n", "\n"])
 def test_unparseable_uptime_is_an_error_fact(text: str) -> None:
     ctx = fake_context(files={PROC_UPTIME: text})
-    fact = by_key(SystemCollector().collect(ctx))["system.uptime"]
+    fact = by_key(SystemCollector().collect(ctx))["system.uptime_seconds"]
     assert fact.status is FactStatus.ERROR
 
 

@@ -158,6 +158,18 @@ class FixEngine:
         plans = self._plan(fix, fix.commands, operands)
         if isinstance(plans, tuple):  # (code, reason)
             return self._blocked(run_id, fix, fix_id, *plans)
+        # A fix whose undo could not run must not start: plan the rollback now,
+        # so a missing tool or missing root shows up in the dry run.
+        undo = self._plan(fix, fix.rollback, operands)
+        if isinstance(undo, tuple):
+            code, reason = undo
+            return self._blocked(
+                run_id,
+                fix,
+                fix_id,
+                f"rollback_{code}",
+                f"the undo for this fix cannot run, so the fix is not started: {reason}",
+            )
 
         rental = ""
         if fix.requires_no_active_rental:
@@ -265,11 +277,10 @@ class FixEngine:
                 )
             argv, early = self._runner.plan(step.op_id, **given)
             if early is not None:
-                code = (
-                    "needs_root"
-                    if early.status is CommandStatus.NEEDS_ROOT
-                    else "not_allowed"
-                )
+                code = {
+                    CommandStatus.NEEDS_ROOT: "needs_root",
+                    CommandStatus.MISSING: "tool_missing",
+                }.get(early.status, "not_allowed")
                 return code, early.detail or early.status.value
             plans.append(argv)
         return plans

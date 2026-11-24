@@ -73,6 +73,7 @@ def host(
         results=results,
         files={
             "/etc/os-release": 'ID=ubuntu\nVERSION_ID="24.04"\n',
+            "/proc/version": "Linux version 6.8.0-45-generic (buildd)\n",
             "/proc/uptime": "100.0 200.0\n",
             "/etc/resolv.conf": "nameserver 127.0.0.53\n",
         },

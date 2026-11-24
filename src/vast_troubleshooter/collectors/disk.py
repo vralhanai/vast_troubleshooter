@@ -18,7 +18,10 @@ from vast_troubleshooter.runner import CommandResult, CommandStatus
 _NAME = re.compile(r"[A-Za-z0-9_-]+")
 _PHYSICAL_TRANSPORTS = {"nvme", "sata", "sas", "ata", "scsi"}
 _DEVICE_NAME = re.compile(r"nvme\d+n\d+|sd[a-z]{1,3}")
-_PAIR = re.compile(r'(\w+)="([^"]*)"')
+_PAIR = re.compile(r'(?<!\w)(\w+)="([^"]*)"')  # lookbehind: linear on long words
+# A real device list is small. Bounds keep hostile output from costing time.
+_MAX_LSBLK_ROWS = 2000
+_MAX_LINE = 4096
 # Whole word, case-sensitive: smartctl's own errors say "Smartctl", not "SMART".
 _SMART_WORD = re.compile(r"\bSMART\b")
 _HEALTH = re.compile(
@@ -36,7 +39,9 @@ _ATTR_IDS = {
 
 def parse_lsblk(text: str) -> list[dict[str, str]]:
     rows = []
-    for line in text.splitlines():
+    for line in text.splitlines()[:_MAX_LSBLK_ROWS]:
+        if len(line) > _MAX_LINE:
+            continue  # not a device row
         pairs = {k: _unescape(v) for k, v in _PAIR.findall(line)}
         if pairs:
             rows.append(pairs)
@@ -93,7 +98,13 @@ def parse_nvme(text: str) -> dict[str, int | str]:
 def parse_ata_attributes(text: str) -> dict[str, int]:
     found: dict[str, int] = {}
     for line in text.splitlines():
-        stripped = re.sub(r"\s*\(.*\)\s*$", "", line).strip()
+        if len(line) > _MAX_LINE:
+            continue  # not an attribute row
+        # Drop a trailing "(Min/Max 20/45)"-style note: from the first "(" when
+        # the line ends with ")". (A regex for this is quadratic on "(((((".)
+        stripped = line.rstrip()
+        if stripped.endswith(")") and "(" in stripped:
+            stripped = stripped[: stripped.index("(")]
         tokens = stripped.split()
         if len(tokens) < 8 or not tokens[0].isdigit():
             continue

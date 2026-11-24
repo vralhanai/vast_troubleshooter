@@ -100,7 +100,7 @@ class SystemCollector(Collector):
             seconds = float(text.split()[0])
         except IndexError, ValueError:
             return self.fact(
-                "system.uptime",
+                "system.uptime_seconds",
                 status=FactStatus.ERROR,
                 source_command=source,
                 raw_excerpt=f"unparseable: {text[:100]!r}",

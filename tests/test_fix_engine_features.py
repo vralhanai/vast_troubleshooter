@@ -506,3 +506,44 @@ def test_a_successful_fix_is_not_rolled_back_because_a_later_step_misreported(
     outcome = engine.run("variant-fix", **CONFIRM)
     assert not outcome.rolled_back
     assert "t.undo" not in runner.run_calls  # a working fix is left alone
+
+
+# -- planning covers the undo too, and a missing tool is named as such (F-18, F-19) ---------------
+
+
+class MissingToolRunner(FakeMutationRunner):
+    def __init__(self, *args, missing: set[str], **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(*args, **kwargs)
+        self._missing = missing
+
+    def plan(self, op_id: str, **operands: str):  # type: ignore[no-untyped-def]
+        if op_id in self._missing:
+            return [], CommandResult(
+                op_id, CommandStatus.MISSING, detail="resolvectl was not found"
+            )
+        return super().plan(op_id, **operands)
+
+
+def test_a_missing_tool_is_reported_as_missing_not_as_not_allowed(
+    tmp_path: Path,
+) -> None:
+    runner = MissingToolRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"]}, missing={"t.step2"}
+    )
+    engine, runner, _, _ = build(tmp_path, BASE, runner=runner)
+    outcome = engine.run("variant-fix")
+    assert outcome.block_code == "tool_missing"
+    assert "was not found" in outcome.reasons[0]
+
+
+def test_a_fix_whose_undo_cannot_run_is_not_started(tmp_path: Path) -> None:
+    runner = MissingToolRunner(
+        {"t.step1": ["/a"], "t.step2": ["/b"], "t.undo": ["/u"]}, missing={"t.undo"}
+    )
+    engine, runner, _, _ = build(
+        tmp_path, variant(rollback=(FixStep("t.undo"),)), runner=runner
+    )
+    outcome = engine.run("variant-fix", **CONFIRM)
+    assert outcome.block_code == "rollback_tool_missing"
+    assert "undo" in outcome.reasons[0]
+    assert runner.run_calls == []  # the fix itself never ran

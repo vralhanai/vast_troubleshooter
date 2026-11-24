@@ -109,7 +109,8 @@ _OPERATIONS = (
         id="disk.df",
         executable="df",
         args=("-P", "-B1", "{path}"),
-        operands={"path": re.compile(r"/[A-Za-z0-9_./+-]*")},
+        # No `..` segment: the path must name a place, not walk to one.
+        operands={"path": re.compile(r"/(?!(?:.*/)?\.\.(?:/|$))[A-Za-z0-9_./+-]*")},
     ),
     Operation(
         id="disk.findmnt_root", executable="findmnt", args=("-no", "OPTIONS", "/")

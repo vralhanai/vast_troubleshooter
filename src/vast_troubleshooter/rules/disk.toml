@@ -40,6 +40,13 @@ recommendation = "The kernel usually remounts a filesystem read-only after disk 
 source = "https://docs.vast.ai/host/ssd-health"
 checked = "2026-11-23"
 
+# A container's root is often read-only on purpose (hardening), so this says
+# nothing about a drive there. Judged only on a real host.
+[rule.only_if]
+type = "equals"
+fact = "system.in_container"
+value = false
+
 [rule.when]
 type = "equals"
 fact = "disk.root_mounted_rw"

@@ -325,3 +325,22 @@ def test_a_command_that_cannot_be_killed_does_not_hang_the_tool(
     assert time.monotonic() - start < 4  # returned; did not wait the full 8 seconds
     assert result.status is CommandStatus.TIMEOUT
     assert "could not be stopped" in result.detail
+
+
+@pytest.mark.parametrize(
+    "path", ["/var/lib/docker", "/", "/mnt/data-1/x_y+z", "/a/..b", "/a/b.."]
+)
+def test_df_accepts_real_paths(path: str) -> None:
+    from vast_troubleshooter.runner import _operand_problem
+
+    assert _operand_problem(READ_OPERATIONS["disk.df"], {"path": path}) is None
+
+
+@pytest.mark.parametrize(
+    "path", ["/..", "/var/../etc", "/a/b/..", "/../x", "relative", "/a b", "/-x;"]
+)
+def test_df_refuses_paths_that_walk_or_are_not_plain(path: str) -> None:
+    """F-25: `..` segments were accepted."""
+    from vast_troubleshooter.runner import _operand_problem
+
+    assert _operand_problem(READ_OPERATIONS["disk.df"], {"path": path}) is not None

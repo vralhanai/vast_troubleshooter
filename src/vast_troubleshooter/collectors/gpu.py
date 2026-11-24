@@ -60,9 +60,25 @@ def decode_throttle(hex_text: str) -> tuple[str, str | None]:
     return (",".join(names) if names else "none"), None
 
 
+_MAX_CSV_LINE = 4096
+
+
 def _rows(text: str) -> list[list[str]]:
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    return list(csv.reader(lines, skipinitialspace=True))
+    """CSV rows. A line that cannot be a real nvidia-smi row (too long, or
+    unparseable) becomes a one-field row, which the callers already treat as
+    malformed, instead of raising."""
+    rows: list[list[str]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if len(line) > _MAX_CSV_LINE:
+            rows.append(["<line too long>"])
+            continue
+        try:
+            rows.extend(csv.reader([line], skipinitialspace=True))
+        except csv.Error:
+            rows.append(["<unparseable line>"])
+    return rows
 
 
 class GpuCollector(Collector):
@@ -96,8 +112,10 @@ class GpuCollector(Collector):
         vram: list[int] = []
         rows = _rows(query.stdout)
         expected = 1 + len(GPU_QUERY_FIELDS)
+        malformed = 0
         for position, row in enumerate(rows):
             if len(row) != expected:
+                malformed += 1
                 facts.append(
                     self.fact(
                         f"gpu.{position}.row",
@@ -130,7 +148,19 @@ class GpuCollector(Collector):
                     names.append(str(value))
                 if status is FactStatus.OK and suffix == "memory_total":
                     vram.append(int(value))  # type: ignore[arg-type]
-        facts.insert(0, self.fact("gpu.count", len(indexes), source_command=source))
+        # A count made from only the rows that could be read would understate the
+        # GPUs (or say zero), so with any unreadable row the count is not claimed.
+        count = (
+            self.fact(
+                "gpu.count",
+                status=FactStatus.ERROR,
+                source_command=source,
+                raw_excerpt=f"{malformed} nvidia-smi row(s) could not be parsed",
+            )
+            if malformed
+            else self.fact("gpu.count", len(indexes), source_command=source)
+        )
+        facts.insert(0, count)
         if names:
             facts.append(
                 self.fact(

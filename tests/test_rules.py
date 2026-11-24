@@ -93,8 +93,8 @@ CASES: dict[str, tuple[dict[str, object], dict[str, object]]] = {
         {"disk.docker_dir_total_bytes": 200_000_000_000},
     ),
     "disk.root_not_writable": (
-        {"disk.root_mounted_rw": False},
-        {"disk.root_mounted_rw": True},
+        {"disk.root_mounted_rw": False, "system.in_container": False},
+        {"disk.root_mounted_rw": True, "system.in_container": False},
     ),
     "disk.smart_health_failed": (
         {"disk.smart_failed_count": 1},
@@ -204,6 +204,7 @@ def test_findings_are_sorted_most_severe_first_then_by_id() -> None:
         F("kernel_log.xid_count", 2),
         F("kernel_log.xid_codes", "79"),
         F("disk.root_mounted_rw", False),
+        F("system.in_container", False),
     ]
     findings = findings_of(evaluate_rules(list(RULES.values()), facts))
     assert [f.rule_id for f in findings] == [
@@ -541,3 +542,23 @@ def test_a_rule_file_that_is_not_utf8_is_a_rule_file_error(tmp_path: Path) -> No
     (tmp_path / "a.toml").write_bytes(b"\xff\xfe\x00bad")
     with pytest.raises(RuleFileError, match="a.toml"):
         load_rules_dir(tmp_path)
+
+
+# -- a read-only root is a finding on a host, not in a hardened container (F-26) -------------------
+
+
+def test_a_read_only_root_in_a_container_is_not_a_finding() -> None:
+    assert (
+        status_of(
+            "disk.root_not_writable",
+            {"disk.root_mounted_rw": False, "system.in_container": True},
+        )
+        is CheckStatus.SKIPPED
+    )
+
+
+def test_a_read_only_root_is_unknown_when_the_environment_cannot_be_told() -> None:
+    """Never claim 'host' (and so a critical finding) without knowing it is one."""
+    assert status_of("disk.root_not_writable", {"disk.root_mounted_rw": False}) is (
+        CheckStatus.UNKNOWN
+    )
