@@ -123,7 +123,17 @@ class DockerCollector(Collector):
         facts.append(
             self._text("docker.default_runtime", info.get("DefaultRuntime"), source)
         )
-        facts.append(self._text("docker.root_dir", info.get("DockerRootDir"), source))
+        # A custom location can carry a customer or project name, so only the
+        # standard path is reported by value.
+        root = info.get("DockerRootDir")
+        shown = (
+            root
+            if root == "/var/lib/docker"
+            else "custom location"
+            if isinstance(root, str) and root
+            else None
+        )
+        facts.append(self._text("docker.root_dir", shown, source))
         return facts
 
     def _text(self, key: str, value: object, source: str | None) -> Fact:

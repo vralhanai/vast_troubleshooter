@@ -289,3 +289,82 @@ def test_there_is_no_way_to_switch_redaction_off() -> None:
 def test_local_identifiers_returns_lists_and_never_raises() -> None:
     hosts, users, ids = local_identifiers()
     assert all(isinstance(x, str) for x in (*hosts, *users, *ids))
+
+
+# -- found by independent testing (F-03, F-11, F-12, F-23) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("hostname", "username"),
+    [("host", "user"), ("ab", "bob"), ("redacted", "key"), ("ip", "mac")],
+)
+def test_names_that_match_our_own_placeholders_still_redact_idempotently(
+    hostname: str, username: str
+) -> None:
+    """F-03: a host named `host` used to make `[host]` become `[[host]]`, so the guard
+    refused every report."""
+    r = Redactor([hostname], [username], [])
+    sample = f"{hostname} {username} /home/{username}/x [redacted-ip] 10.0.0.5 {hostname}.{username}"
+    once = r.text(sample)
+    assert r.text(once) == once  # idempotent
+    assert not r.leaves_something(once)
+    assert "10.0.0.5" not in once and f"/home/{username}/" not in once
+
+
+@pytest.mark.parametrize(
+    "sample",
+    ["vm_10.0.0.5_data", "node10.0.0.5x", "pod-192.168.1.20-b", "a_8.8.4.4.5_b"],
+)
+def test_an_address_is_redacted_even_when_glued_to_letters_or_underscores(
+    sample: str,
+) -> None:
+    out = R.text(sample)
+    digits = [p for p in ("10.0.0.5", "192.168.1.20") if p in sample]
+    assert all(d not in out for d in digits)
+
+
+@pytest.mark.parametrize(
+    "sample", ["user_alice", "alice_data", "my-alice-box", "xalice.y".replace("x", "_")]
+)
+def test_a_known_user_name_is_redacted_when_joined_by_a_separator(sample: str) -> None:
+    assert "alice" not in R.text(sample).lower()
+
+
+def test_a_name_inside_a_longer_word_is_left_alone() -> None:
+    assert R.text("malicenter") == "malicenter"  # `alice` is not a separate word here
+
+
+def test_an_ipv4_mapped_ipv6_address_is_fully_redacted() -> None:
+    out = R.text("peer ::ffff:10.0.0.5 and ::ffff:192.168.1.1")
+    assert "10.0.0.5" not in out and "192.168.1.1" not in out and "ffff" not in out
+
+
+def test_a_secret_later_in_the_same_token_is_still_found() -> None:
+    assert "hunter2" not in R.text("a=password=hunter2")
+    assert "hunter2" not in R.text("name=ok;password=hunter2")
+
+
+def test_values_of_secret_named_keys_are_redacted_and_other_keys_are_kept() -> None:
+    out = R.text("API_KEY=abc123 mode=fast")
+    assert "abc123" not in out and "mode=fast" in out
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda n: "a" * n,
+        lambda n: "a." * (n // 2),
+        lambda n: "token" * (n // 5),
+        lambda n: "x@" * (n // 2),
+        lambda n: "a-b" * (n // 3),
+        lambda n: "api_key=" * (n // 8),
+        lambda n: ' key="' * (n // 6),
+    ],
+)
+def test_redaction_time_grows_linearly_not_quadratically(build) -> None:  # type: ignore[no-untyped-def]
+    """F-12: 100,000 characters used to take over 20 seconds."""
+    import time
+
+    start = time.monotonic()
+    R.text(build(100_000))
+    assert time.monotonic() - start < 3.0

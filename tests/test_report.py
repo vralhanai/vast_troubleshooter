@@ -436,3 +436,47 @@ def test_build_report_does_not_mutate_the_diagnosis() -> None:
     before = [f.model_dump_json() for f in diag.facts]
     build_report(diag, None, NOW)
     assert [f.model_dump_json() for f in diag.facts] == before
+
+
+# -- found by independent testing (F-13, F-14) -----------------------------------------------------
+
+
+def test_host_fields_and_evidence_are_capped_to_the_shareable_limit() -> None:
+    """F-13: a 40,000-character OS name used to bypass the 200-character limit."""
+    huge = "x" * 40_000
+    diag = diagnosis(
+        F("system.os_pretty_name", huge),
+        F("system.kernel_release", huge),
+        F("network.dns_vast_ai_resolves", False),
+    )
+    report = Report.model_validate_json(make(diag)[0])
+    assert len(report.host.os or "") <= 200 and len(report.host.kernel or "") <= 200
+
+
+def test_a_custom_docker_root_directory_is_not_exported() -> None:
+    import json as _json
+
+    from vast_troubleshooter.collectors.docker import DockerCollector
+    from vast_troubleshooter.runner import CommandResult, CommandStatus
+    from vast_troubleshooter.testing import fake_context
+
+    info = _json.dumps(
+        {
+            "ServerVersion": "27.3.1",
+            "DefaultRuntime": "runc",
+            "Runtimes": {"runc": {}},
+            "DockerRootDir": "/srv/acme-corp-customer-42/docker",
+        }
+    )
+    ctx = fake_context(
+        results={
+            "docker.info": CommandResult(
+                "docker.info", CommandStatus.OK, returncode=0, stdout=info
+            )
+        }
+    )
+    facts = DockerCollector().collect(ctx)
+    diag = diagnosis(*facts)
+    json_text, md_text = make(diag)
+    assert "acme-corp-customer-42" not in json_text + md_text
+    assert {f.key: f.value for f in facts}["docker.root_dir"] == "custom location"

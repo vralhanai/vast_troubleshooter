@@ -27,7 +27,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vast_troubleshooter import __version__
 from vast_troubleshooter.diagnose import Diagnosis
-from vast_troubleshooter.models import Fact, FactStatus, Scalar, ShareableFact
+from vast_troubleshooter.models import (
+    MAX_SHAREABLE_STRING,
+    Fact,
+    FactStatus,
+    Scalar,
+    ShareableFact,
+)
 from vast_troubleshooter.redact import Redactor
 from vast_troubleshooter.securefs import create_private_file, ensure_private_dir
 
@@ -151,7 +157,7 @@ def _host(facts: Mapping[str, Fact]) -> HostSummary:
     os_name = _ok(facts, "system.os_pretty_name")
     return HostSummary(
         environment=_str(_ok(facts, "system.environment")),
-        os=os_name if isinstance(os_name, str) else None,
+        os=_str(os_name),
         kernel=_str(_ok(facts, "system.kernel_release")),
         gpu_count=_int(_ok(facts, "gpu.count")),
         gpu_model=_str(_ok(facts, "gpu.0.name")),
@@ -163,7 +169,8 @@ def _host(facts: Mapping[str, Fact]) -> HostSummary:
 
 
 def _str(value: object) -> str | None:
-    return value if isinstance(value, str) else None
+    """A string, capped to the shareable limit so a hostile value stays small."""
+    return value[:MAX_SHAREABLE_STRING] if isinstance(value, str) else None
 
 
 def _int(value: object) -> int | None:
@@ -234,7 +241,10 @@ def build_report(
         fact = facts.get(key)
         if fact is None:
             return Evidence(key=key, status="not_collected")
-        return Evidence(key=key, value=fact.value, status=fact.status.value)
+        value = fact.value
+        if isinstance(value, str):
+            value = value[:MAX_SHAREABLE_STRING]
+        return Evidence(key=key, value=value, status=fact.status.value)
 
     return Report(
         generated_at=(now or datetime.now(UTC)).isoformat(timespec="seconds"),
