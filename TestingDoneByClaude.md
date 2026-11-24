@@ -4,8 +4,32 @@ Pre-Step-19 review and testing of `vast-troubleshooter`, commit `8f35b60`
 (2026-11-23). Everything here was run, not assumed. Where a claim comes from
 someone else and I did not reproduce it, it says so.
 
-**Status of every finding below: OPEN. Nothing was fixed in this round.** The only
-file changed is this one.
+**Current status (after the fix round, see section 11): all 33 findings are FIXED
+except F-21, which is a design decision moved to `BACKLOG.md`.** Sections 1 to 10
+describe the code as it was when I tested it (commit `8f35b60`); the numbers in the
+scoreboard below are those "before" numbers. The "after" numbers are in the next
+table and in section 11.
+
+## 0. Before and after
+
+| | Before (`8f35b60`) | After the fix round |
+|---|---|---|
+| Tests, Windows | 775 passed, 6 skipped | **858 passed, 14 skipped** |
+| Tests, real Linux, non-root | 730 passed, 1 skipped | **819 passed, 3 skipped** |
+| Tests, real Linux, root (ownership cases run) | not run | **821 passed, 1 skipped** |
+| Line coverage | 97% | **97%** (2,734 statements, 74 missed) |
+| `ruff check` / `ruff format --check` | clean | clean |
+| `mypy src` | 14 errors | **0 issues** |
+| Fuzz campaign | 4 of 10 checks passed | **9 of 10** (the one failure is a name glued directly to letters, by design) |
+| Worst collector time on hostile input | 91 s (disk) | **0.014 s** |
+| Redaction of 100,000 hostile characters | over 20 s | **under 0.1 s** |
+| Report with a 40,000-character OS name | 12.6 s | **under 0.01 s** |
+| End-to-end run on real systemd | no checks, could not fail | **54 checks, 0 failed**, exit code reflects failures |
+| Open findings | 32 | **0** (31 fixed; F-21 moved to the backlog; F-33 found and fixed) |
+
+Not changed, and still true: **the tool has never run on a real Vast host, a real
+NVIDIA GPU, or `amd64`, and the CLI still cannot apply a fix to a live host** (rental
+detection for VMs is a fail-closed stub). See section 7 and `BACKLOG.md`.
 
 ## 1. Scoreboard
 
