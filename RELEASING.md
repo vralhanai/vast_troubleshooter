@@ -30,3 +30,6 @@ wheel and run `vast-troubleshooter --help`, `version` and `diagnose --json`.
 - Dependency or base-image vulnerabilities: update `uv.lock` or the digest, rerun the full
   tests, release a patch version.
 - There is no auto-update and no network call from the tool; updating is the operator's action.
+
+## Checksums for 0.1.0
+See `SHA256SUMS` (reproduced from clean checkouts, twice, with identical results).
